@@ -1,0 +1,1009 @@
+\documentclass[12 pt]{article}
+\usepackage{graphicx, verbatim}
+\usepackage{float}
+\usepackage{subfig}
+\usepackage{url}
+\setlength{\textwidth}{7in} 
+\setlength{\textheight}{9in}
+\setlength{\oddsidemargin}{0in} 
+\setlength{\evensidemargin}{0in}
+\setlength{\topmargin}{-1.5cm}
+\overfullrule=2cm
+\usepackage[linktoc=all]{hyperref}
+\usepackage{titlesec}
+\hypersetup{colorlinks, citecolor=black, filecolor=black, linkcolor=black,urlcolor=black}
+\usepackage[citestyle=verbose,bibstyle=numeric,sorting=ynt,backend=biber]{biblatex}
+\addbibresource{lit.bib}
+\begin{document}
+\setcounter{tocdepth}{2}
+\linespread{1.3}
+\tableofcontents
+
+<<init,echo=FALSE,warning=FALSE,results='hide',message=FALSE,cache=FALSE,eval=TRUE>>=
+#DONT CACHE SAYS YIHUI
+require(dplyr)              ### Used Extensively
+require(ggplot2)            ### Used Extensively
+require(gridExtra)          ### For facet plots
+require(knitr)              ### For chunk control
+require(leaps)              ### For feature selection
+require(lubridate)          ### For date grouping, conversions
+require(reshape2)           ### For melt()
+require(scales)             ### For plotting
+require(texreg)             ### Regression Output using texreg()
+require(tidyr)              ### For spread()
+require(xtable)             ### Tabular Output using xtable()
+options(scipen=999,digits=4,formatR.arrow=TRUE,width=90)
+coruse = 'pairwise.complete.obs'
+opts_chunk$set(list(fig.path='figure/minimal-', fig.align='center',echo=FALSE, fig.show='hold',tidy=TRUE,fig.height=5,fig.pos='H',warning=FALSE, message=FALSE,results='asis'))
+@
+
+<<funcs,results='hide',cache=FALSE, echo=FALSE>>=
+mlm <-function(formula, data){return(summary(lm(formula,data)))}
+mf<-function(ct){return(transform(ct,freq=n/sum(n)))}
+ratio <- function(x, y){
+  return((x+.0001) /(y + .0001))
+}
+notNA<-function(df){
+  ret = apply(df, 2, function(x) length(which(!is.na(x)))/length(x))
+  return(sort(ret))
+}
+mySumm <- function(df){
+  relRows = c('min','max','median','mean','std.dev')
+  return(stat.desc(df)[relRows,])
+}
+me <- function(df){
+  relRows = c('mean')
+  return(stat.desc(df)[relRows,])
+}
+keepNumeric <-function(x){
+  nums <- sapply(x, is.numeric)
+  return(x[ , nums])
+}
+histos<-function(m) {
+  m = melt(m)
+  ggplot(m,aes(x = value)) + 
+    facet_wrap(~variable,scales = "free_x") + geom_density()
+}
+dropBoring<-function(fp){
+  out <- lapply(fp, function(x) length(unique(x)))
+  keep <- which(out > 1)
+  return(fp[keep])
+}
+naRep<-function(col, val){
+  col[is.na(col)] <- val
+  return(col)
+}
+charFac<-function(ep){
+  i <- sapply(ep, is.factor)
+  ep[i] <- lapply(ep[i], as.character)
+  return(ep)
+}
+@
+
+<<readin,cache=FALSE,eval=TRUE>>=
+nd = read.csv('Data/loans.csv')
+@
+
+<<cleanStrats,cache=FALSE>>=
+nd  = filter(nd, nd$LoanStatus %in% c("Chargedoff",'Completed','Defaulted')) %>%
+  mutate(Date = as.Date(date)
+         ,payments = LP_CustomerPayments + LP_NonPrincipalRecoverypayments
+         ,CreditScoreEst = (CreditScoreRangeLower + CreditScoreRangeUpper)/2
+         ,dbg = ifelse((LoanStatus=='Completed') & (roi < 0), 1,0)
+         ,mgroup = floor_date(Date,"month")) %>%  
+  filter(!is.na(CreditScoreEst)) %>% filter(dbg==0) %>% filter(mgroup!="2009-05-01")
+nd$dbg<-NULL
+catmap= c("NA","Debt Consolidation","Home Improvement", "Business", "Personal", "Student Use", "Auto","Other")
+nd$purpose = catmap[nd$ListingCategory..numeric.+1]
+nd$spread = round(nd$BorrowerRate - nd$LenderYield, 4)
+### SCALING ###
+toscale = c('BorrowerRate','CreditScoreEst','TotalCreditLinespast7years','OpenRevolvingAccounts','CreditScoreEst','CurrentDelinquencies','DelinquenciesLast7Years','PublicRecordsLast10Years','DebtToIncomeRatio','StatedMonthlyIncome','TotalProsperLoans','TotalProsperPaymentsBilled','OnTimeProsperPayments','ProsperPaymentsLessThanOneMonthLate','ProsperPrincipalBorrowed','MonthlyLoanPayment','LoanOriginalAmount','CreditScoreEst')
+
+scaled = data.frame(scale(nd[toscale]))
+colnames(scaled) = sapply(colnames(scaled),FUN=paste,'.sc', sep='')
+nd = cbind(nd, scaled)
+nd$CreditScoreEst.1<-NULL
+nd$defaulted <- ifelse(nd$LoanStatus=='Completed',0,1)
+dis0 = as.Date(mdy("10-16-2008"))
+dis1 = as.Date(mdy("12-20-2010"))
+
+old = filter(nd, Date < dis1)
+o1 = filter(old, Date <= dis0) %>% transform(grade=CreditGrade, regime="Auction-Early")
+o2 =  filter(old, Date > dis0) %>% transform(grade=ProsperRating..Alpha., regime="Auction-Late")
+old = rbind(o1,o2)
+n = filter(nd, Date >= dis1) %>% transform(grade = ProsperRating..Alpha., regime="Prosper-rate")
+
+navec = apply(keepNumeric(old), 2, function(x) length(which(!is.na(x)))/nrow(old))
+drops = names(navec[navec==0])
+old  = old[,!(names(old) %in% drops)]
+n  = n[colnames(old)]
+
+n$regime = 'Prosper-rate'
+nd =rbind(old,n)
+
+###Train, test Split for full-data Regressions
+nd$regimeBool = ifelse(nd$regime=='Auction-Early', 0, 1)
+nd$holdout = ifelse(nd$ListingKey %in% sample(nd$ListingKey, nrow(nd)/2), 1,0)  
+fulltrain = filter(nd, holdout == 0); fulltest = filter(nd, holdout == 1)
+#####LOOKAHEAD FIX#####
+cut1= median(o1$Date); cut2 = median(o2$Date); cut3 = median(n$Date)
+o1= mutate(o1
+             ,cutDays = as.numeric(difftime(cut1, ymd(Date),units='days'))
+             ,maturity = cutDays/1095
+             ,def = ifelse((roi+1) < maturity, 1, 0))
+train = filter(o1, Date < cut1); test = filter(o1, Date >=cut1)
+o2= mutate(o2
+             ,cutDays = as.numeric(difftime(cut2, ymd(Date),units='days'))
+             ,maturity = cutDays/1095
+             ,def = ifelse((roi+1) < maturity, 1, 0))
+tr2= filter(o2, Date < cut2); te2 = filter(o2, Date >=cut2)
+
+if(FALSE){
+  ###ATTEMPT AT KNOWN-ROI
+  train$owed = train$LoanOriginalAmount * train$maturity
+  train$kpay  = ifelse((train$LoanStatus != 'Completed') & (train$payments >= train$owed),
+                       train$owed, train$payments * train$maturity)
+}
+
+n = mutate(n
+           ,cutDays = as.numeric(difftime(cut3, ymd(Date), units='days'))
+           ,maturity = cutDays/1095
+           ,def = ifelse((roi+1) < maturity, 1, 0))
+tr3= filter(n, Date < cut3); te3 = filter(n, Date >= cut3)
+stopifnot(length(nd$regime) > 0)
+@
+
+<<featSelection0,results='hide',cache=FALSE>>=
+numvars = 8 #Number of features to select
+##With Scaled Data###
+bigReg1.sc = regsubsets(def ~
+                          BorrowerRate.sc + TotalCreditLinespast7years.sc + OpenRevolvingAccounts.sc + OpenRevolvingMonthlyPayment + InquiriesLast6Months + TotalInquiries + CurrentDelinquencies.sc + DelinquenciesLast7Years.sc + PublicRecordsLast10Years.sc + DebtToIncomeRatio.sc + StatedMonthlyIncome + TotalProsperLoans.sc + TotalProsperPaymentsBilled.sc + OnTimeProsperPayments.sc + ProsperPaymentsLessThanOneMonthLate.sc + ProsperPaymentsOneMonthPlusLate + ProsperPrincipalBorrowed.sc + MonthlyLoanPayment.sc +CreditScoreEst.sc + StatedMonthlyIncome.sc
+                        ,nbest=1
+                        ,nvmax=numvars
+                        ,intercept=TRUE
+                        ,really.big=TRUE
+                        ,data = train)
+
+bigReg2.sc = regsubsets(def ~
+                          BorrowerRate.sc + TotalCreditLinespast7years.sc + OpenRevolvingAccounts.sc + OpenRevolvingMonthlyPayment + InquiriesLast6Months + TotalInquiries + CurrentDelinquencies.sc + DelinquenciesLast7Years.sc + PublicRecordsLast10Years.sc + DebtToIncomeRatio.sc + StatedMonthlyIncome + TotalProsperLoans.sc + TotalProsperPaymentsBilled.sc + OnTimeProsperPayments.sc + ProsperPaymentsLessThanOneMonthLate.sc + ProsperPaymentsOneMonthPlusLate + ProsperPrincipalBorrowed.sc + MonthlyLoanPayment.sc +CreditScoreEst.sc + StatedMonthlyIncome.sc
+                        ,nbest=1
+                        ,nvmax=numvars
+                        ,intercept=TRUE
+                        ,really.big=TRUE
+                        ,data = tr2)
+
+bigReg3.sc = regsubsets(def ~
+                          BorrowerRate.sc + TotalCreditLinespast7years.sc + OpenRevolvingAccounts.sc + OpenRevolvingMonthlyPayment + InquiriesLast6Months + TotalInquiries + CurrentDelinquencies.sc + DelinquenciesLast7Years.sc + PublicRecordsLast10Years.sc + DebtToIncomeRatio.sc + StatedMonthlyIncome + TotalProsperLoans.sc + TotalProsperPaymentsBilled.sc + OnTimeProsperPayments.sc + ProsperPaymentsLessThanOneMonthLate.sc + ProsperPaymentsOneMonthPlusLate + ProsperPrincipalBorrowed.sc + MonthlyLoanPayment.sc +CreditScoreEst.sc + StatedMonthlyIncome.sc
+                        ,nbest=1
+                        ,nvmax=numvars
+                        ,intercept=TRUE
+                        ,really.big=TRUE
+                        ,data = tr3)
+@
+%full train feat selection in Draft3.Rnw
+<<testFuncs,results='hide',cache=FALSE>>=
+makeForm<-function(bigReg, y = 'roi ~ grade +'){
+  #FOR FEATURE SELECTION
+  if(is.recursive(summary(bigReg))){
+    wh = summary(bigReg)$which
+    vars = names(wh[numvars,][wh[numvars,]==TRUE])[1:numvars+1]  
+    form = paste(y, paste(vars,collapse=' + '), sep=' ')    
+  }else{
+    print('FAILING TO AUTOMATE FEATURE SELECTION')
+    form = "roi ~ BorrowerAPR + OpenRevolvingAccounts + InquiriesLast6Months + TotalInquiries + CurrentDelinquencies + DelinquenciesLast7Years + MonthlyLoanPayment + CreditScoreEst"
+  }
+  return(form)
+}
+
+regTest<<-function(reg, test, fg=10){
+  if(nrow(test)==1) return(as.numeric())
+  test$predicted = predict(reg,test)
+  breaks=quantile(test$predicted, probs=seq(0,1, by=.1), na.rm=TRUE)
+  test$fitgroup <- as.numeric(cut(test$predicted, breaks=breaks, include.lowest=TRUE))
+  return(subset(test, test$fitgroup==fg)$roi)
+}
+
+ruleTest<-function(train){
+  inq = quantile(train$TotalInquiries, probs=(.4), na.rm=TRUE)
+  amt = quantile(train$LoanOriginalAmount, probs=(.4), na.rm=TRUE)
+  best = subset(train, train$TotalInquiries < inq & train$LoanOriginalAmount < amt)
+  return(best$roi)
+}
+meanUL<-function(vec){return(mean(unlist(vec),na.rm=TRUE))}
+sdUL<-function(vec){return(sd(unlist(vec),na.rm=TRUE))}
+@
+
+\title{The Folly of the Crowd: \\ Market Inefficiencies in Peer to Peer Lending}
+\author{Samuel Shleifer\\ Yale University}
+\date{\today}
+\maketitle 
+\begin{abstract}
+This paper documents violations of market efficiency in Peer to Peer Lending, using data from Prosper.com, America's first Peer-to-Peer Lending Marketplace. Peer to Peer lending is the practice of individual and institutional investors lending money to borrowers over the internet, without the assistance of a traditional financial intermediary. Theories of Market Efficiency predict that investors price assets to earn an expected return commensurate with risk taken, and that asset ``prices should fully reflect publicly available information." Contrary to these, and other, efficient market hypothesis predictions: 
+\begin{enumerate}
+\item Investors in risky Prosper loans earn negative average returns during the first few years of its history.
+\item Investors earn lower returns on riskier loans during the first few years of Prosper's history.
+\item Strategies using publicly available information can earn superior risk-adjusted returns.
+\item Poor loan performance during the first few years of Prosper's history is a consequence of poor, and not just an unfortunate time period. Had investors better used the information at their disposal, they would have earned better returns.
+\end{enumerate}
+These violations of market efficiency are discussed in the midst of two market design changes by Prosper that guided and then forced investors towards setting more efficient interest rates. Such guidance and eventual price control, as opposed to unconstrained auction rate setting, improved loan performance.
+\end{abstract}
+\newpage
+\section{Introduction}
+Historically, there are two major perspectives of efficient market prices. Fama ((1970)'s semi-strong efficient markets hypothesis ("EMH") predicts that a strategy using publicly available information should not be able to earn excess risk-adjusted returns. Risk models, such as CAPM, imply that risky assets should have positive expected returns and that riskier assets should have higher returns than less risky assets.  The information aggregation perspective associated with (Hayek, 1945) and (Stiglitz and Grossman, 1980), further predicts that many individuals, each using their own information, collectively arrive at a more efficient price than a central planner who sets prices, since the central planner cannot access all the information available to the crowd.\footcite{stiglitz}\footcite{hayek}
+
+In the P2P Lending context, the market's price is the interest rate associated with a loan. This paper studies the question of whether interest rates on Prosper.com are set efficiently. (Fama, 1970)'s semi-strong EMH predicts that if interest rates were set efficiently, then...
+\begin{enumerate}
+\item Loans would have positive expected returns. Investors would be unwilling to lend to Borrowers if they expected to lose money. \footnote{Assuming a Risk-Free Rate of 0}
+\item Riskier loans would have higher expected returns. \footcite{sharpe}
+\item It is not possible to do better than the average investor using publicly available information. \footcite{fama}
+\end{enumerate}
+I test hypothesis 1 by measuring the historical returns of loans up to a certain date, and then asking whether loans with negative expected returns get funded at that date.
+I test hypothesis 2 by comparing the Returns of high risk loans to low risk loans.
+I test hypothesis 3 by using publicly available information to select loans with a higher than average expected return.
+
+
+Prosper.com data provide some additional valuable insights into investor behavior. As it happens, over the period I study, there are three interest rate determination regimes:
+\begin{enumerate}
+\item Early Auction Regime (April 19, 2006-October 15, 2008): Rates are set by investor auction. Investors have large amounts of data, but Prosper does not guide them meaningfully.
+\item Late Auction Regime: (July 1, 2009-December 20, 2010): Rates are set by investor auction, with Prosper offering valuable guidance in the form of more complex credit grading.
+\item Prosper-rate Regime: (December 21, 2010 - August 3, 2011): Prosper sets rates using its more complex credit grading algorithm.
+\end{enumerate}
+
+The early auction regime is closest to Hayek's vision of the free market, since interest rates are determined freely by investors through auctions.  In this case, the EMH predictions of no negative average returns, a positive relationship between risk and return, and no improvement in performance from using public information are most applicable.  Yet, as I show, it is precisely in this regime that the three predictions of the EMH are most dramatically violated. In the two later regimes, when Prosper first provides much more guidance to investors, and then actually sets interest rates, investor returns improve dramatically. The evidence across regimes is broadly inconsistent with the view that local knowledge and the wisdom of the crowd improves price discovery. To the contrary, it appears that a "centralized' Prosper mechanism of either guiding or setting interest rates actually leads to fewer predictable mispricings: as Prosper becomes more involved in the rate-setting process, the excess returns available using publicly available information approach 0, while aggregate returns exhibit higher mean and lower variance.
+
+A major confound of this analysis is the time period. Perhaps 2006-2008, the early auction period, is just a bad time to invest in consumer credit, whereas 2009-2011 is much better. To address this concern, I estimate the importance of time effects by comparing default rates of loans to similar borrowers in different periods. I then show that time period is not the only explanation of the various changes to the marketplace by estimating what loan performance would have been if pre-shutdown borrowers borrowed at the higher Prosper-set interest rates.
+
+\subsection{Background}
+Peer-to-peer lending (``P2PL")  is the practice of lending money to borrowers over the internet, without going through a traditional financial intermediary. \footnote{\url{en.Wikipedia.org/wiki/Peer-to-peer_lending}} From April 2006 until December 2010, interest rates were set by lenders, who competed for the lowest rate in a reverse auction model.\newline
+In October 2008, Prosper was shut down by the SEC, and re-opened after a 9 month quiet period with more stringent under-writing standards, and greater guidance for lenders . Importantly, all the information about borrower creditworthiness that is used in this paper was available to investors when they bid on loans.
+Since December 2010, the beginning of \textit{Prosper-rate} regime, rates have been pre-set by Prosper on the basis of a Borrower's Credit history.
+
+Under all three regimes, lenders could choose to whom to lend and how much to lend, allowing them to diversify across many loans, thereby decreasing the variance of their returns. In exchange for verifying borrowers' identities and managing servicing, Prosper charges a 0.5-5 percentage point origination fee on each loan depending on the borrower's risk profile and loan duration. This fee is usually 1\%. Fees are added to the borrower's monthly payment.\footnote{There are no prepayment penalties.} This rate is lower than that charged by most traditional financial institutions, which have the higher costs of physical branches, and pay for human analysis of credit history.\footcite{hanson}
+The P2PL model relies on lenders being able to infer the riskiness of borrowers: since Prosper gets fees from monthly payments, they too are incentivized to maximize investor returns, both for short term profit, and long term reputation.\newline
+
+In my sample, Prosper's origination volume, as shown in Figure \ref{fig:origTime}, peaked in the months before the shutdown, and then slowly resumed after the quiet period. Since 2011, when the sample ends, origination volume has eclipsed its 2008 peak.\newline
+<<origTime, cache=FALSE, fig.cap='This chart shows two panels. The first panel shows the number of Loans funded on Prosper in each month of the sample. The second panel shows the total dollars lent to borrowers in each month of the sample.', fig.height=4>>=
+g2 = group_by(nd, mgroup, regime) %>%
+  summarise(Number_Of_Loans = length(mgroup), Dollars = sum(LoanOriginalAmount))
+g2 = melt(g2,id.vars = c("mgroup",'regime'))
+
+ggplot(g2, aes(x=mgroup,fill=regime)) +
+  geom_area(aes(y=value)) +
+  facet_wrap(~variable,nrow=2,scale='free_y')+
+  scale_x_date(labels=date_format('%b-%y')) +
+  scale_y_continuous(labels=comma) +
+  theme_bw()+
+  labs(title='Prosper: Loan Origination by Month', x='Month', y='Number of Loans',fill='Regime',
+       facet=c('Number of Loans','Dollars Lent'))
+## TODO(fix facet labels)
+@
+
+<<catsTab, cache=FALSE>>=
+catTab = filter(nd, purpose != "NA") %>% count(purpose, sort=TRUE) %>% mutate(Frequency = n/sum(n))
+xtable(catTab, digits=3, label='catTab', caption = "Stated Reasons for Borrowing on Prosper (NAs removed)")
+@
+
+Reasons for borrowing on Prosper, as shown in Table \ref{catTab}, have changed relatively little over the site's 8 year history: the plurality of borrowers aim to consolidate credit, while fewer use the funds to start a business, or pay for a wedding or a car.
+Morse (2015) finds that ``Borrowers are characterized as debt-laden, middle-to-high income, individuals who are consolidating credit cards and other debt." The average P2P loan face value comprises 20.5\% of annual income, and payments absorb 7.5\% of monthly income.\footcite{morse}
+
+\subsection{Auction Design}
+From April 19, 2006 until December 20, 2010. Prosper operated a \emph{variable rate} model, where lenders and borrowers determined interest rates using a Dutch auction-like system, where each investor bid consisted of a (dollar amount, interest rate) pair. In these auctions, borrowers would declare a maximum reservation interest rate, where bidding would start. Over the course of a 7-10 day bidding period, that rate would be bid down by investors, with the loan's interest rate closing at the lowest rate $R_{clearing}$ such that enough investors were willing to fully fund the loan at or below the $R_{clearing}$.All investors who bid at or below the clearing rate would receive the clearing rate. If a borrower could not reach 100\% funding at his reservation rate, the loan would not be funded.\newline
+As an instructional example, suppose Bill the borrower needed to borrow \$100, and set his maximum rate at 20\%.
+Let Chris, David and Ellen be investors, with Chris bidding (\$50, 15\%), David bidding (\$50, 18\%) and Ellen bidding (\$30,19\%). In this scenario, Chris and David would win the auction, and each lend lend Bill \$50, and receive an 18\% interest rate. Bill would pay 18\% interest before fees.\newline
+
+
+\subsection{Early Auction Regime}
+In the early auction regime, loans originated between April 19, 2006 and October 15, 2008, auction participants had access to considerable information from Prosper, including over 60  Borrower characteristics, such as residence, employment status and a FICO score bucket, but few intelligent risk estimates. Additionally, Prosper did not regulate who could apply for a loan on the website. Besides basic fraud prevention, any applicant who received 100\% funding from investors was eligible, for Prosper's first year of operation. On March 1, 2007, amidst poor returns, Prosper announced that listings with credit scores below 520 would no longer be offered to investors. This intervention is not discussed for lack of space, but shows that after a year, more or less, Prosper felt the need to nudge a fully decentralized investment process in the right direction.\newline
+In an  October 15, 2008 email, Prosper announced that it would temporarily stop accepting new loan applications to register with the SEC, which subsequently released a cease and desist order characterizing Prosper as a ``seller of securities," rather than a marketplace merely matching lenders and borrowers, as the site had argued.
+\footnote{\url{techcrunch.com/2008/11/26/sec-outlines-its-reasoning-for-shutting-down-p2p-lender-prosper/}}\footnote{SEC LETTER}\newline
+\subsection{Late Auction Regime}
+After a 9 month quiet period, Prosper re-opened, using the same Auction model, with three significant market interventions. First, under-writing standards again became more stringent: new borrowers were required to have a FICO score above 640, and repeat borrowers were required to have a score above 600. 
+
+Second, whereas previously Prosper used only credit score to determine a borrower's Credit Grade (eg. AA), the site began offering a more advanced, multi variable formula to determine each borrower's credit grade for investors consideration. Finally, the site also partnered with FolioFN, a secondary market where lenders could liquidate their positions. Crucially, Prosper still had no direct role in setting interest rates, investors still used an auction, but with the extra information credit grades that more closely matched default probabilities. 
+Besides credit score, Prosper began using (and still uses) the following ``Key variables" to determine its revamped credit grades: \footnote{CITE =  Estimated Loss Page}
+\begin{itemize}
+\item  TotalInquiries: The number of times potential lenders requested the borrowers' credit portfolio from the credit bureau, which is usually Experian or a competitor.
+\item CurrentDelinquencies: The number of delinquent loans associated with the borrower.
+\item Credit card utilization: how much of available credit the borrower uses on a monthly basis.
+\item Number of open credit card accounts
+\item Debt to income ratio
+\item Loan payment performance on prior Prosper loans.
+\end{itemize}
+This Auction rate-setting mechanism continued for more than a year after the shutdown, until December 20, 2010.
+\subsection{Prosper-rate Regime}
+Under the current \emph{Prosper-rate} model, enacted December 21, 2010, lenders no longer determine the loan rate in an auction. Instead, Prosper uses the intelligent credit grades given to investors in the late auction regime to set interest rates on loans, with slightly less stringent under-writing standards to determine eligibility. The change was motivated by a desire to accelerate the listing process, so that investors could reinvest money more quickly. Moreover, towards the end of the late auction regime, auctions were arriving at interest rates that were almost completely determined by the credit score. Under the fixed-rate regime, investors choose whether or not to invest in a given loan, at the interest rate set by Prosper, so bids only consist of a dollar amount.\newline
+
+\section{Literature}
+\subsection{Efficient Markets Hypothesis}
+In layman's terms, the efficient markets hypothesis (EMH), states that 'it is impossible to beat the market.' More specifically, Fama explains that market prices should always fully reflect publicly available information. Therefore, EMH rules out the possibility of strategies that earn excess returns using only publicly available information. \footcite{fama}
+In the P2P lending context, this market price is the interest rate determined by investors (or accepted by investors in the fixed-rate regime), and paid by the borrower, and returns are the cash flows received from borrowers divided by the amount invested.
+(Fama, 1970) notes the dependence of most tests of market efficiency on a model of risk and return.
+The models, including most famously, Sharpe's capital asset pricing model ('CAPM'), make two predictions:
+First,  since an investor can always hold cash, the average return on risky investments must be positive. Second, securities with higher systematic risk earn higher average returns.\footcite{sharpe}
+
+The EMH rests on three assumptions. ``First, investors are assumed to be rational and hence to value securities rationally. Second, to the extent that some investors are irrational, their decisions are random and uncorrelated. Third, to the extent that some investors are irrational in similar ways, they are met in the market by rational arbitrageurs, who eliminate their influence on prices." \footcite{as}
+
+In a reverse interest rate auction, such as Prosper's market design, however, arbitrageurs cannot short a borrower and increase his interest rate.  In the situation where irrational investors under estimate a borrower's riskiness, they will outbid rational bidders, and set the market price. To earn excess returns, then, an investor must select loans for which other investors have demanded too high a rate, so that he can participate in funding.
+
+
+\subsection{Soft Information and Credit Screening}
+The novel idea of P2P is a large group of investors may be better equipped to assess risk than traditional financial institutions. ``Traditionally, the credit score provided by rating agencies has been the main tool banks use to screen smaller borrowers."\footcite{iyer} As such, the initial strand of literature focuses largely on the novel sources of information utilized by P2P investors.
+(Gao and Lin, 2012) analyze the text written by the borrower in the ``description field" of the application, and find that descriptions that are easy to read have 2.3\% lower default rates than average, while complex narratives are associated with a 3.6\% higher default rate, but do not analyze return on investment.\footcite{gao} Pope and Sydnor (2008) find that investors can reduce their defaults by statistically discriminating against racial minorities, but do not analyze return on investment. (Iyer et. al,2009) find that within the credit score buckets provided by Prosper, investors use soft information to further sort borrowers within buckets, reducing defaults.\footcite{iyer}
+These papers echo Hayek (1945)'s basic argument for market efficiency: that many individuals, each using their own information, collectively arrive at one efficient price.  The right price ``might have been arrived at by one single mind possessing all the information which is in fact dispersed among all the people involved in the process." \footcite{hayek}
+
+This essay contributes to this literature along two dimensions. First, I use ROI, rather than a simple default rate, to measure the improvement of investment strategies over a benchmark. Second, and more importantly, my paper pushes back against the idea that the soft information used by borrowers is more useful for credit screening; I find that borrowers do not do a very good job aggregating the various hard credit information at their disposal, and synthesizing this into an interest rate that reflects the riskiness of the borrower. When Prosper, as a central planner, assists them, they set much more efficient prices.
+%Liquidity,cost-induced default and other unused citations can be found in hypo.cut.tex
+
+\section{Data}
+My sample consists of 39,555 three year, unsecured (no collateral) Loans, worth \$231.7 Million,  originated from 2006-2011, downloaded off Prosper.com at various points by various people. Borrowers apply for loans by creating a public listing on the Prosper.com website, and can request anywhere from \$1,000 to \$35,000.\footnote{The minimum increased to \$2,000 effective Nov. 1, 2011}. Since our analysis requires measurement of loan performance, which can only take place 3 years after origination(given 3 year maturity), we must end the sample in 2011, as we do not know what will end up happening to more recently originated loans. As shown in Table \ref{sample}, this leaves us with many more early auction regime loans than the post shutdown regimes.\newline
+<<sampTab, cache=FALSE>>=
+xtable(count(nd,regime) %>% transform(freq. =  n/nrow(nd)), 
+       digits=4, caption='Observations per regime. Each observation is one loan.', label='sample')
+@
+
+To help investors better assess the creditworthiness of borrowers, for every loan originated in the site's history, Prosper posts data regarding loan performance, such as payments made, interest rate, and principal lost. Borrower characteristics, including credit variables, which are usually obtained directly from a consumer credit agency like FICO, and verification of income and employment, are also posted on the website in the borrower's \emph{listing} for prospective investors to consider as they decide who to lend to, and available for download.
+\subsection{Variable Definitions for the Prosper Data}
+<<sumTable,cache=FALSE>>=
+nd$default.rate =  nd$defaulted
+k4 = c('roi','default.rate', 'LenderYield','BorrowerRate','regime','LoanOriginalAmount','Investors','CreditScoreEst','DebtToIncomeRatio', 'InquiriesLast6Months')
+ag4 <- aggregate(.~regime, nd[k4], function(x) c(mean = mean(x), sd = sd(x)))
+d4 = t(do.call(data.frame, c(ag4, check.names = FALSE)))
+d5 = data.frame(d4)
+names(d5) = d4[1,]
+d6 = d5[-1,]
+xtable(d6,caption='Means and Standard Deviations for Relevant Variables by Regime.',digits=3, label='sumStats')
+@
+For each loan, Prosper offers 63 interesting variables, I now define an important subset.
+\begin{itemize}
+\item BorrowerRate: Annual interest rate paid by the borrower
+\item TotalCreditLinespast7years: Number of credit lines, including cards and loans, used by the borrower in the seven years before the prosper loan was originated.
+\item Inquirieslast6Months: Number of times a lender inquired about the Borrower's credit report, in the 6 months before the loan was originated. Traditional lenders make inquiries when a borrower applies for a loan, so this serves as a proxy for the number of times someone has borrowed in the past 6 months.
+\item CurrentDelinquencies: Number of loans on which the borrower is delinquent at the origination date.
+\item DelinquenciesLast7Years: The number of loans which the borrower has not repaid fully over the 7 years before the origination date.
+\item MonthlyLoanPayment: The borrower's scheduled monthly payment on the Prosper loan.
+\item CreditScoreRangeLower: The lower bound of the credit score range (which bounds his FICO score) , that bounds a borrower's credit grade, as provided by FICO.
+\item CreditScoreEst: The average of the lower and upper bounds of the credit score range. 
+\item PublicRecordsLast10Years: Number of public records of borrowing activity in the past 10 years at the origination date. 
+\item DebtToIncomeRatio: The debt to income ratio of the borrower at the origination date. This value is capped at 10.01 (any debt to income ratio larger than 1000\% will be coded as 1001\%).
+\item TotalProsperPaymentsBilled: Number of on time payments the borrower made on Prosper loans at the time they created the listing. This value is 0 if the borrower had no prior loans.
+\item LenderYield: The lender's Yield on the loan. Equal to the Interest rate minus servicing fee.
+\item BorrowerRate: The borrower's interest rate for the loan.
+\item Investors: The number of investors that funded the loan.
+\item *.sc: The Variable * was scaled to have 0 mean and unit variance. (found only in regression results)
+\end{itemize}
+
+\subsection{Measuring Loan Performance with ROI}
+<<roivstatus,cache=FALSE,fig.height=3,fig.cap="This chart shows the distribution of ROI for completed, defaulted and chargedoff loans over all 3 regimes. A continuous ROI variable offers more information about the quality of an investment than a binary default indicator. Dotted lines indicate group means.",fig.height=3>>=
+smeans = summarise(group_by(nd,LoanStatus), mRoi = mean(roi, na.rm=TRUE))
+ggplot(nd, aes(x=roi,fill=LoanStatus,scales='free_y')) +
+  geom_histogram(binwidth=.01)+
+  facet_wrap(~LoanStatus,ncol=1) +
+  geom_vline(data=smeans, aes(xintercept=mRoi,color=LoanStatus),linetype='longdash') + 
+  theme_bw() +
+  # facet_wrap(~LoanStatus,ncol = 1)+
+  labs(title='Distribution of ROI for each Loan Outcome (all regimes)', x='ROI',y='Count') +
+  scale_x_continuous(limits=c(-1, 1), breaks=seq(-1,1,by=.25),label=percent)
+  # scale_y_continuous(label=comma)
+  @
+
+In order to capture the actual impact of a loan on an investor's portfolio, we measure the ROI for a given loan as the sum of the borrower's payments / amount borrowed -1.
+\begin{equation}
+ROI = \frac{amount.repaid}{amount.borrowed} -1
+\end{equation}
+Where amount.repaid is the sum of the borrower's monthly payments. As shown in Figure \ref{fig:roivstatus}, a return on investment variable offers much more granularity than a binary default variable for both defaulted and repaid loans. In many observations, a borrower paid back half his principal before defaulting. A binary indicator would treat this loan, which only cost the investor half his money, as equal to a loan that repaid him nothing. Additionally, a default indicator fails to account for the higher interest payments associated with riskier loans. Still, measuring ROI and default lead to similar conclusions, as the correlation between ROI and default is -79.7\% over the full sample.\newline
+
+I do not discount or annualize ROIs, because in the period of low interest rates, the difference between default and repayment is large enough that a few percentage points don't matter: loans that default average -46\% ROI, loans that repay average + 24\% ROI.\footnote{I will probably use discounting in the final draft, but it doesn't change results, and it feels like a low priority, at this stage.}
+\footnote{Elaborate} 
+
+
+\subsection{Prosper's Charged-Off vs. Default Terminology}
+After the shutdown, Prosper began using the term ``Charged-Off" to mean that a loan is delinquent past 120 days. We observe more defaults than charge-offs before the shutdown, but more charge-offs than defaults after, likely because of the shift in terminology. According to Prosper's website:
+\begin{quote}
+In general, a debt or account is considered “charged off” when it is unlikely that further payments will be received. Debts are usually charged off after they remain unpaid for a period of time (e.g., 90 to 180 days). Prosper uses the 120 days as the charge off threshold because loans that become over 120 days past due are eligible for sale to a debt buyer, and we have found that there is a steep drop-off in likelihood of further payments after 120 days of delinquency.
+\footnote{\url{http://blog.prosper.com/2008/09/16/charge-offs-explained/}}
+\end{quote}
+
+\section{Performance Across Regimes}
+This section begins with an examination of ROIs over time and and across borrower credit buckets. I then discuss regime differences in default rates and interest rates, the two features that largely determine returns. The discussion of interest rates includes measurement of investors' varying sensitivity to risk across regimes. The section closes by examing the impact of Prosper's interventions, which reduce the valid borrower pool to a less-risky subset and assign borrowers more informative credit grades, on investor returns. 
+
+I find the following: (1) the mean ROI of early auction regime loans is negative, (2) in the early auction regime, average ROI is lower for higher risk loans, (3) interest rates are insufficiently sensitive to risk in the early auction period and (4) investors made sub-optimal choices, given the information they had at their disposal, and (5) Prosper's interventions improved investor returns.
+
+Finding (1) is inconsistent with the EMH prediction that risky assets like Prosper loans should offer investors a positive expected return.\footnote{Otherwise, investors would just hold cash.}
+Finding (2) is inconsistent with the prediction that riskier loans should have higher expected returns to compensate investors for taking risks.
+Finding (3) describes the sub-optimal investor decisions that led to (1) and (2), in response to arguments that investors chose an unlucky time period.
+Finding (4) is inconsistent with Hayek's notion that a free market will arrive at accurate prices without the meddling of a central planner.
+
+<<figPrep0,cache=FALSE>>=
+mmeans = summarise(group_by(nd,mgroup,regime)
+                   , mdef = mean(defaulted,na.rm=TRUE)
+                   , sd.def = sd(defaulted, na.rm=TRUE)
+                   , mRoi = mean(roi, na.rm=TRUE)
+                   , sd.roi = sd(roi, na.rm=TRUE)
+                   , mRate = mean(LenderYield, na.rm=TRUE)
+                   , sd.rate = sd(LenderYield, na.rm=TRUE)
+                   , mcs = mean(CreditScoreEst, na.rm=TRUE)
+                   , sd.cs = sd(CreditScoreEst, na.rm=TRUE)
+                   , numLoans=length(roi)
+                   , dollars = sum(LoanOriginalAmount) / 1000000) %>% mutate(mcs.up = mcs+sd.cs, mcs.down=mcs-sd.cs)
+
+mm2= summarise(group_by(nd,mgroup,regime, CreditScoreEst)
+                   , mdef = mean(defaulted,na.rm=TRUE)
+                   , sd.def = sd(defaulted, na.rm=TRUE)
+                   , mRoi = mean(roi, na.rm=TRUE)
+                   , sd.roi = sd(roi, na.rm=TRUE)
+                   , mRate = mean(LenderYield, na.rm=TRUE)
+                   , sd.rate = sd(LenderYield, na.rm=TRUE)
+                   , numLoans=length(roi)
+                   , dollars = sum(LoanOriginalAmount) / 1000000) %>% filter(numLoans > 5)
+
+app = filter(nd, regime=='Auction-Early', CreditScoreRangeLower > 520)
+
+mm3  = filter(nd, CreditScoreEst == 649.5) %>%
+  group_by(mgroup,regime) %>% summarise(mdef = mean(defaulted,na.rm=TRUE)
+                   , sd.def = sd(defaulted, na.rm=TRUE)
+                   , mRoi = mean(roi, na.rm=TRUE)
+                   , sd.roi = sd(roi, na.rm=TRUE)
+                   , mRate = mean(LenderYield, na.rm=TRUE)
+                   , sd.rate = sd(LenderYield, na.rm=TRUE)
+                   , mcs = mean(CreditScoreEst, na.rm=TRUE)
+                   , sd.cs = sd(CreditScoreEst, na.rm=TRUE)
+                   , numLoans=length(roi)
+                   , dollars = sum(LoanOriginalAmount) / 1000000
+                   , mInq = mean(TotalInquiries)) %>% filter(numLoans > 5)
+if(FALSE){
+  o1.reg  = lm(BorrowerAPR ~ CreditScoreEst + MonthlyLoanPayment + TotalInquiries +CurrentDelinquencies + OpenRevolvingAccounts + grade, data=o1)
+  o2$rhat = predict(o1.reg, o2)
+  o16  = filter(o1, CreditScoreEst==649.5)
+  o26  = filter(o2, CreditScoreEst==649.5)
+}
+@
+
+\subsection{ROI Across Regimes}
+<<roivtime,cache=FALSE,fig.height=3, fig.cap="This chart shows the mean ROI of loans originated each month in our sample.The blurred line is the average ROI accross all loans. the solid line is the average ROI for loans to borrowers in the 640-660 credit score bucket. Loans funded after the shutdown are associated with higher ROI, even controlling for Borrower Creditworthiness.">>=
+ggplot() +
+  geom_line(aes(x=mmeans$mgroup, y=mmeans$mRoi, size=mmeans$dollars,color=mmeans$regime),alpha=.3) + 
+  geom_line(aes(x=mm3$mgroup, y=mm3$mRoi, size=mm3$dollars*2,color=mm3$regime)) + 
+  theme_bw() +
+  labs(title='ROI Over Time (read caption)', color='Regime',size='Dollars Originated(millions)',x='Origination Month',y='Mean ROI')+
+  scale_y_continuous(label=percent,limits=c(-.2,.3))
+#For Raw Version remove geom_line(mm3)
+@
+
+Figure \ref{fig:roivtime} shows the performance of loans originated in each month of the sample. The blurred lines represent the mean return across all loans for each month, while the solid lines represents the mean return to borrowers in the 640-659 credit score bucket, which was chosen because it is the most common in the data. The average ROI of all loans increases from \Sexpr{mean(o1$roi,na.rm=TRUE)*100}\%in the early auction period to \Sexpr{mean(o2$roi,na.rm=TRUE)*100}\% in the late auction period.
+The average return for loans originated in each of the site's first 27 months is negative, rejecting the EMH prediction of positive expected returns for risky assets. Of course, it is possible that the time period is unusual. I address this possibility in section 6.
+<<roivscore,cache=FALSE,fig.height=3,fig.cap='This chart shows the mean ROI by borrower credit bucket, under each regime. In the early auction regime, higher risk loans earn lower returns.'>>=
+rateDiff <- summarise(group_by(nd, CreditScoreEst, regime)
+                      ,meanRate = mean(LenderYield,na.rm=TRUE)
+                      , medRate = median(LenderYield,na.rm=TRUE)
+                      , meanRoi = mean(roi,na.rm=TRUE)
+                      , medRoi = median(roi,na.rm=TRUE)
+                      , meanInq=mean(TotalInquiries,na.rm=TRUE) 
+                      ,num = length(roi)) %>% filter(num > 10)          
+
+ggplot(rateDiff, aes(x=CreditScoreEst, y=meanRoi,size=num,color=regime))+
+  geom_line() +
+  theme_bw() +
+  xlim(500,900) + 
+  scale_y_continuous(labels=percent) +
+  labs(title='Estimated Credit Score vs. ROI',x= 'Estimated Credit Score'
+       , y='Mean ROI',color='Regime',size='Number of Loans')
+#Total Inquiries, other cluster vars.
+@
+
+Figure \ref{fig:roivscore} shows that higher risk loans earn lower returns in the early auction regime, inconsistent with the EMH prediction of a risk, reward tradeoff. 
+The expected pattern is shown in later two regimes' curves: riskier loans earn higher average returns. Figure \ref{fig:roivscore} also reveals early auction regime returns are worse than the other two regimes' returns for each bucket, but that the gap is much greater for riskier loans. Again, time period may be a confounding factor, as riskier investments often perform worse in bad economic times, a possibility I discuss later.
+We now examine default rates and interest rates, the two features that explain the variation in returns.
+
+\subsection{Interest Rates and Defaults Across regimes}
+<<ratevtime,cache=FALSE,fig.height=3, fig.cap="The blurred line shows is the median interest rate of loans originated each month. The solid line represents the average rate for loans to borrowers in the 640-660 credit score bucket for each month. Loans funded after the shutdown are associated with higher rates after controlling for borrower credit score bucket.">>=
+ggplot() +
+  geom_line(aes(x=mmeans$mgroup, y=mmeans$mRate, size=mmeans$numLoans, color=mmeans$regime),alpha=.5) + 
+  geom_line(aes(x=mm3$mgroup, y=mm3$mRate, size=mm3$numLoans, color=mm3$regime)) + 
+  theme_bw() +
+  labs(title='Interest Rates Over Time (read caption)', color='Regime',size='Number of Loans',x='Origination Month',y='Mean Rate')+
+  scale_y_continuous(label=percent, limits=c(.1, .33))
+@
+
+Figure \ref{fig:ratevtime} presents the median interest rate \footnote{Before Fees.} for each month of the sample. The solid line again represents borrowers in the 640-660 credit score bucket, while the blurred line represents all borrowers. Overall (blurred line), the median interest rate paid by borrowers increases from 17.4\%  to 19.6\% to 22.5\% over the early auction, late auction and Prosper-rate regimes. When we control for borrower selection by only considering the 640-660 credit score bucket,however, the climb  in median interest rate,from 17.1\%  in the early auction period to 26.4\% in the late auction period is more dramatic. Interestingly, rates for the 640-660 bucket are almost identical directly before and right after the shutdown but the upwards trend, from from 15\% at the beginning of 2007 to 30\% at the end of 2010 is clear.\footnote{WHY THE BIG 2010 RUNUP}
+
+<<ratevscore, cache=FALSE, fig.cap='This Chart shows the median interest rate borrowers from each credit score bucket paid during each period. Under the Early Auction Regime, interest rates were lower, especially for risky borrowers.',fig.height=3>>=
+rd = filter(rateDiff, CreditScoreEst > 640)
+ggplot(rd, aes(x=CreditScoreEst, y=medRate, color=regime)) +
+ # geom_point(aes(size=num*10)) +
+  geom_line(size=3)+
+  theme_bw() + 
+  #xlim(450,NA) +
+  labs(title='Credit Score vs. Interest Rate by Regime', x='Estimated Credit Score', y='Mean Interest Rate', size='Number of Loans',color='Regime') +
+  scale_y_continuous(labels=percent)
+@
+Figure \ref{fig:ratevscore} shows that majority of the difference in interest rates between regimes can be attributed to the rates paid by borrowers in risky credit buckets, with credit scores in the 620-700 range. Investors across regimes demand similar interest rates from low-risk (high credit) borrowers. For the 760-780 bucket, early auction regime investors charged  9.0\%, late auction regime investors charged 9.4\%. However, for higher risk buckets, the prices are extremely different; for the 640-660 bucket, early auction regime investors charged 16.0\%, while late auction investors charged 26.3\%. 
+<<defvscore,fig.height=3,cache=FALSE, fig.cap='This chart shows the default rate of the borrowers in each credit score bucket.'>>=
+
+
+d2 =  group_by(nd,regime,CreditScoreEst) %>% 
+  summarise(dr = mean(defaulted), d4=sum(defaulted*roi)/sum(defaulted),  num=length(mgroup)) %>% filter(CreditScoreEst > 600)
+
+ggplot(d2, aes(CreditScoreEst,dr))+
+  geom_point(aes(size=num)) +
+  geom_smooth()+
+  geom_vline(xintercept=600,linetype=2) +
+  xlim(400,NA) +
+  facet_wrap(~regime,ncol=1) +
+  scale_y_continuous(label=percent) +
+  theme_bw() +
+  #scale_x_continuous(label=percent) +
+  labs(x='Credit Bucket',y='Default Rate',size='Number of Loans')
+@
+More generally, the slope of the curves in Figure \ref{fig:ratevscore} show that late auction regime investors were much more sensitive to changes in credit score than early auction regime investors. In the early auction regime, a 100 point increase in credit score is associated with a 4\% reduction in interest rate. In the late auction regime, a 100 point increase in credit score is associated with an 11\% reduction. Early auction regime investors were especially insensitive to changes in credit score below the 600-620 buckets, as the four buckets directly below each have mean rate around 25\%. Early auction regime investors' insensitivity to variance in credit score among risky borrowers works well in the context of Iyer et. al (2009)'s finding that investors relied on ``soft'' information when evaluating borrowers with low credit scores. This reliance on soft information, however, is not associated, in my findings, with higher returns. Figure \ref{fig:defvscore} presents the relationship between credit bucket and default rate\footnote{Other Assets?}, and shows that the probability of default continues to increase, and may even accelerate, with reductions in credit score below the dotted line at 600. 
+
+Early auction regime investors, then, were not sufficiently sensitive to the hard credit variables that are predictive of default, especially when evaluating risky, low-credit borrowers, suggesting that the poor returns of the early auction regime were not caused only by the time period, but also by poor investor decisions.\footnote{NEED MORE HERE} We now look at the more informative grading algorithm Prosper began using after the shutdown, which made investors more sensitive to hard credit variables.
+\subsubsection {More Informative Grading, Higher Interest Rates}
+<<csmix2, cache=FALSE, fig.height=9, fig.cap='Another way to visualize the credit scores of borrowers in each grade. Dotted Lines indicate mean credit bucket for each grade.',fig.height=5>>=
+gbf = filter(rbind(o1,o2), grade != 'NC') %>% filter(grade != '') %>% group_by(grade,regime)
+gbf$g2 = factor(gbf$grade, levels= c("AA","A","B","C","D","E","HR"))
+means  = summarise(gbf, val = mean(CreditScoreEst,na.rm = TRUE)
+                   ,num = length(CreditScoreEst)) %>% transform(g2= grade)
+
+ggplot(ungroup(gbf), aes(x=CreditScoreEst,fill=g2)) +
+  #geom_density(aes(x=CreditScoreEst,fill=g2)) + 
+  geom_histogram(aes(y=..count..))+
+  facet_grid(regime~g2,scales='free_y') +
+  xlim(400,900)+ theme_bw()+
+  geom_vline(data=means, aes(xintercept=val,color=g2), linetype=2) +
+  labs(title='Credit Grade Assignments by Regime.',
+       x ='Credit Score Bucket',y='Count',fill='Credit Grade') +
+    scale_x_continuous(breaks=seq(from=600,to=800,by=200),limits=c(500,900))
+@
+In Figure \ref{fig:csmix2}, each $(row,column)$ entry is the distribution of borrower credit scores that were assigned grade $column$ during the $row$ regime. For example the top row, leftmost entry presents the credit score buckets of the borrowers who were assigned grade AA in the early auction regime. In the early auction regime, all borrowers in a given credit bucket were assigned the same grade. Since all borrowers in the 640-680 buckets were assigned grade C, we can see two adjacent spikes, one for the 640-660 bucket, and another for the 660-680 bucket, in the top row of the grade C column of Figure \ref{fig:csmix2}.No other credit grades in the top row have any borrowers from the 640-680 buckets.
+
+In the late auction regime, Prosper began using multiple variables to form its credit grade, and borrowers in each credit score bucket are spread across grades based on other credit variables. Correspondingly, in the bottom row of the grade C column of Figure \ref{fig:csmix2}, we can see that late auction regime, grade C borrowers came from 11 different credit buckets.
+When Prosper began aggregating hard credit variables into more informative grades, investors began using these grades to determine interest rates.
+
+<<ratepred,cache=FALSE>>=
+func2 <- function(LenderYield,CreditScoreEst,TotalInquiries,CurrentDelinquencies,grade){
+  tmp = data.frame(cbind(LenderYield,CreditScoreEst,TotalInquiries,CurrentDelinquencies,factor(grade)))
+  rateReg  = mlm(LenderYield ~ CreditScoreEst + CurrentDelinquencies + grade, data=tmp)
+  return(rateReg$adj.r.squared)
+}
+func3 <- function(LenderYield,CreditScoreEst,TotalInquiries,CurrentDelinquencies,grade){
+  tmp = data.frame(cbind(LenderYield,CreditScoreEst,TotalInquiries,CurrentDelinquencies,factor(grade)))
+  rateReg  = mlm(LenderYield ~ CreditScoreEst + CurrentDelinquencies, data=tmp)
+  return(rateReg$adj.r.squared)
+}
+func4 <- function(LenderYield,CreditScoreEst,TotalInquiries,CurrentDelinquencies,grade,defaulted){
+  tmp = data.frame(cbind(LenderYield,CreditScoreEst,TotalInquiries,CurrentDelinquencies,factor(grade)))
+  rateReg  = mlm(defaulted~ CreditScoreEst, data=tmp)
+  return(rateReg$adj.r.squared)
+}
+rf = group_by(nd,regime) %>% 
+  summarise(fit = func2(LenderYield,CreditScoreEst,TotalInquiries,CurrentDelinquencies,grade)
+            ,num = length(LenderYield))
+colnames(rf) = c('Regime','Fit','Number of Loans')
+xtable(rf, label='ratefit',caption= 'This table documents the predictability of interest rates in each of the three regimes in the Fit column. Predictability is measured as the Adjusted R squared of a regression with interest rate as the dependent variable and standard credit variables as independent variables, using every loan in the relevant regime.')
+
+rf2 = group_by(nd,regime) %>% 
+  summarise(fit = func3(LenderYield,CreditScoreEst,TotalInquiries,CurrentDelinquencies,grade)
+            ,num = length(LenderYield))
+colnames(rf2) = c('Regime','Fit','Number of Loans')
+xtable(rf2, label='ratefit2',caption= 'This table documents how much of the variance in interest rates can be explained by borrowers\' credit score buckets. Fit is measured as the Adjusted R squared with interest rate as the dependent variable and credit score bucket as the independent variable, using every loan in the relevant regime.')
+@
+The tension between the importance of the credit score in the credit grade and the importance of the credit score in the interest rate is resolved by the fact that credit grades are much more predictive of interest rates in the later two regimes. As shown in Table \ref{ratefit}, whose \emph{Fit} column shows the fraction of the variance in interest rate that can be described by variance in hard credit variables, as measured by the adjusted $r^{2}$ of a regression with interest rate as the dependent variable and credit score bucket, current delinquencies and credit grade as independent variables. This regression yields adjusted $r^{2}$ of 48\%, 88\% and 97\% for the early auction, late auction and Prosper-rate regimes, respectively, suggesting that Prosper's more informative grades are immediately used by borrowers to determine interest rates. \footnote{The full regression results are available in the appendix.}
+
+Adversaries may argue that since we do not know Propser's exact grading formula, it may include information that was not previously available to borrowers.Table \ref{ratefit2} addresses this argument, by running the same procedure as Table \ref{ratefit}, but with only credit score bucket as an independent variable. The direction of the results is the same: Prosper's change to more informative grading did not only lead to a larger role for those grades in investors' interest rates, but increased the weight of credit score bucket, a variable that investors had access to in the same format in both periods. If the crowd of investors were as wise as (Hayek, 1945) theorizes, Prosper's repackaging of multiple variables into a more informative credit grade should not affect the weight of hard information in investors' risk estimates. Furthermore, Figure \ref{fig:defvscore} makes is clear that investors would have experienced fewer defaults, and thus earned higher returns, if they had used credit buckets more heavily in their risk assessments, given the poor returns associated with low credit borrowers. We can thus interpret some of the poor returns of the early auction regime to a lower level of reliance on hard information. 
+
+In the next sub section, I examine Prosper's other interventions, which ban low-credit borrowers, and show that these interventions also similarly improved investor returns.
+\subsection{Impact of Low-Credit Borrower Ban}
+<<csvtime,cache=FALSE,fig.height=3, fig.cap="This figure presents average estimated credit score of loans originated each month. The average credit score increases from 653 in the early auction regime to 714 in the late auction regime, before returning to 705 in the Prosper-rate regime. Grey clouds indicate one standard deviation.">>=
+ggplot(mmeans, aes(x=mgroup, y=mcs, color=regime)) +
+  geom_point(aes(size=numLoans))+
+  geom_smooth(aes(ymax=mcs.up, ymin=mcs.down),stat='identity') +
+  #geom_line() +
+  theme_bw() +
+  labs(title='Borrower Credit Scores Over Time', size='Number of Loans',x='Origination Month', y='Mean Borrower Credit Score')
+##TODO(ADD ERROR BARS)
+@
+We now turn to Prosper's policy changes, which restrict the types of borrowers who investors are allowed to lend to. An auction perspective predicts that the crowd of lenders should be able to effectively screen all candidates, not just low risk candidates. On multiple occasions, however, Prosper has intervened to restrict the borrower pool to high credit borrowers, and thereby improved investor returns. Figure \ref{fig:csvtime} shows the mean borrower credit score for each month in the sample, with the grey clouds showing one standard deviation bounds. Overall, for the three samples in full, the average borrower credit scores increases from 653.2 before the shutdown to 714.2 after the shutdown, then dips to 705 for the Prosper-rate period.
+For the first 10 months of Prosper's history, investors choose to lend to borrowers with an average estimated credit score of 609. Prosper's policy change, on March 1, 2007, that prevented loans to ``low-credit borrowers," defined as those with credit score below 520, showed an immediate positive impact on investor decision making and returns.
+
+Prosper's reasoning for the change was to protect investors: by March 1, 2007, 14.9\% of loans to low-credit borrowers had already defaulted, more than triple the 4.6\% of loans to other borrowers that had already defaulted. \footnote{the 10 \% gap in default rates is even more striking when the average age of the two groups of loans is considered. On March 1, 2007, the loans to low-credit borrowers averaged 100 days since origination, while loans to other borrowers averaged 122 days since origination. 14.9\% of low credit borrowers defaulted over an average time since origination of 100 days, whereas only 4.6\% of other borrowers defaulted over an average time since origination of 122 days.} Theoretically, however, it is more difficult to understand why Prosper needed to step in. From the EMH perspective, theory predicts that investors would have reacted to the news of the defaults on low credit loans by decreasing their exposure to low credit loans, or increasing the interest rates they bid on them. However, the median interest rate on low-credit, actually decreased from 24.23\% for the month of July, 2006 to 23.4\% for February, 2007, the month before the intervention. Similarly, exposure to low credit loans did not substantially decrease. On December 1, 2006, 13.3\% of these bad loans had already, after an average of only 3 monthly payments, gone into default, as compared to 3.7\% of other loans. Yet over the month of December 2006, loans to borrowers with credit score below 520 accounted for 22\% of orginations, the highest proportion in the site's history.  The wisdom of the crowd theory expects market participants to adjust their beliefs to new information more rapidly and flexibly than a central planner. The data, however, show that investors continued to make avoidably bad decisions until Prosper disallowed them. 
+
+After the intervention, returns improved substantially. For the loans originated in February 2007, the month before the change, the mean borrower credit score was 620, with standard deviation 117, while the mean ROI on a loan was -13.1\%. For loans originated in March 2007, the month after the change, the mean borrower credit score was 650, with standard deviation of 83, and mean ROI -7.4\%. The 30 point month to month increase in mean borrower credit score is the largest in the sample, and the associated ROI change is not caused by time differences: the default rate to borrowers in the 640-660 bucket, a representative example, was 42.7\% in February, and actually rose to 44.8\% in March. Had Prosper enforced this rule from the site's inception, the default rate on loans originated before the rule change would have been reduced by 6\%, and mean roi would have increased from -9.1\% to -4\%, a savings of roughly \$2 million for investors. 
+
+A similar line of analysis can be applied to examine the impact of Prosper's second intervention. Upon re-opening after the shutdown, borrowers were required to have a credit score $\geq 640$ and returning borrowers were required to have a credit score $\geq 600$. This policy change is associated with a similar shift in average credit score from 678 in October, 2008 to 701 for July, 2009. The contemporaneous decrease in default rates makes it more difficult to explain the ROI jump exclusively through changes to the borrower population. But like in the previous intervention, low-credit loans continued until they were no longer allowed. By September 2008, the last full month before the shutdown, 19.8\% of loans to borrowers in the 520-640 buckets had already defaulted, compared with 8.1\% of loans to more creditworthy borrowers, yet 32\% of originated loans for that month were to borrowers in the 520-640 range. August, 2009, the first full month after the rule change, only 7.5\% of loans were to borrowers in that range, all of whom had borrowed with Prosper before. To reiterate, even with access to public information that showed that their lending strategies were not profitable, investors did not adjust. In the next section, we show that this lack of adjustment allows for the possibility of using public information to earn excess returns during the early auction period.
+<<defvtimeCS,cache=FALSE,fig.height=9, fig.cap="This chart shows the percentage of loans that were not fully repaid in each month of our sample for each Estimated credit score.", eval=FALSE>>=
+ggplot(mm2, aes(x=mgroup,y=mdef)) +
+  geom_line(aes(color=regime)) + 
+  theme_bw() +
+  facet_wrap(~CreditScoreEst) +
+  labs(title='Default Rates Over Time (read caption)', color='Regime',size='Number of Loans',x='Origination Month',y='Default Rate')+
+  scale_y_continuous(label=percent,limits=c(0,1))
+@
+<<roivtime2,cache=FALSE,fig.height=9, fig.cap="This chart shows the mean ROI of loans originated each month in our sample, to Borrowers for each observed Estimated credit score.", eval=FALSE>>=
+ggplot(mm2, aes(x=mgroup,y=mRoi)) +
+  geom_line(aes(color=regime)) + 
+  theme_bw() +
+  facet_wrap(~CreditScoreEst) +
+  labs(title='ROI Over Time (read caption)', color='Regime',size='Number of Loans',x='Origination Month',y='Mean ROI')+
+  scale_y_continuous(label=percent,limits=c(-.2,.3))
+@
+<<ratevtime2,cache=FALSE,fig.height=9, fig.cap="This chart shows the mean Interest Rate fos loans originated each month in our sample, to Borrowers for each observed Estimated credit score.",eval=FALSE>>=
+ggplot(mm2, aes(x=mgroup,y=mRate)) +
+  geom_line(aes(color=regime)) + 
+  theme_bw() +
+  facet_wrap(~CreditScoreEst) +
+  labs(title='Interest Rates Over Time (read caption)', color='Regime',size='Number of Loans',x='Origination Month',y='Mean Rate')+
+  scale_y_continuous(label=percent,limits=c(.05,.34))
+@
+<<csmix, cache=FALSE, fig.cap='This chart shows the credit scores of the Borrowers in each Grade of Loans for each regime. Dotted Lines indicate mean credit score for each grade.',fig.height=5,eval=FALSE>>=
+if(FALSE){
+  a = filter(gbf, regime=='Auction-Early') %>%
+    summarise(mcs = mean(CreditScoreEst,na.rm = TRUE)
+              , num = length(CreditScoreEst))
+  b = filter(gbf, regime=='Auction-Late') %>%
+    summarise(mcs = mean(CreditScoreEst,na.rm = TRUE)
+              , num = length(CreditScoreEst))
+  
+  diffs = inner_join(a,b,by='grade') %>% 
+    transform(delta =mcs.y - mcs.x, ndiff = num.x/num.y) %>% arrange(desc(mcs.x))
+  rm(a); rm(b)
+
+
+ggplot(ungroup(gbf), aes(x=CreditScoreEst, fill=regime)) +
+  geom_density()+
+  geom_vline(data = means, aes(xintercept=val,color=regime), linetype='longdash',alpha=1)+
+  ylim(0,.05) +
+  labs(x='Estimated Credit Score',fill='Regime', y='Percentage of Loans',
+       title= 'Borrower Credit Score Distribution for each Grade by Regime') +
+  facet_wrap(~grade,nrow=2) + theme_bw() +
+  scale_x_continuous(limits=c(369,NA),breaks=c(400,600,800))
+}
+
+@
+<<roiregime, results='asis',cache=FALSE,fig.height=3,fig.cap='This chart documents the distribution of ROI for the loans from each regime. The Auction Regime has many more loans in general, so relative frequency, rather than actual count is displayed. Dotted lines indicated means.',eval=FALSE>>=
+smeans = group_by(nd, regime) %>% summarise(mRoi = mean(roi, na.rm=TRUE))
+ggplot(nd) + 
+  geom_histogram(aes(x=roi,y=..density..),fill='indianred')+
+  facet_wrap(~regime, ncol = 1) +
+   geom_vline(data = smeans, aes(xintercept = mRoi), color='black', linetype='longdash') + 
+  theme_bw()+
+  labs(title='Returns by Regime', x='ROI',y='Relative Frequency')+
+  scale_x_continuous(labels=percent,limits=c(-1,.6),breaks=seq(from=-1,by=.25))
+@
+<<defvtime,cache=FALSE,fig.height=3, fig.cap="This chart shows the percentage of loans that were not fully repaid in each month of our sample. The blurred line is the average default across all loans. the solid line is the default rate for loans to borrowers with a credit score of 649.5. Loans funded after the shutdown are less likely to default, even controlling for borrower creditworthiness.",eval=FALSE>>=
+ggplot() +
+  geom_line(aes(x=mmeans$mgroup, y=mmeans$mdef, size=mmeans$numLoans,color=mmeans$regime),alpha=.3) + 
+  geom_line(aes(x=mm3$mgroup, y=mm3$mdef, size=mm3$numLoans*2,color=mm3$regime),) + 
+  theme_bw() +
+  labs(title='Default Rates Over Time (read caption)', color='Regime',size='Number of Loans',x='Origination Month',y='Default Rate')+
+  scale_y_continuous(label=percent,limits=c(0,NA))
+@
+
+\section{Excess Returns}
+\subsection{Puzzle: Bad Returns in Early Auction regime}
+The key inconsistency with EMH found in the early auction regime data is that a simple loan selection strategy can earn excess returns using publicly available information.
+This section explains the methodological approach used to create such a strategy, including discussion of cross-validation and avoidance of look-ahead bias, and closes with a discussion of the excess returns earned by the strategy.
+
+Although Figure \ref{fig:ratevscore} shows that investors charge higher rates to riskier borrowers, the high risk, low-reward data pattern of the early auction regime, shown in Figure \ref{fig:roivscore} suggests that this preference for more credit-worthy borrowers is not extreme enough, since the extra interest charged to riskier borrowers does not, in aggregate, make up for the difference in default likelihood. This suggests that the variables given to investors by Prosper could be better used to assess borrower creditworthiness, and select loans with the lower likelihood of default. In this section, I use a regression model (that a naive investor might be able to use to choose loans) to show that a simple model to assess borrower creditworthiness can select loans, out of sample, that earn higher returns than the loans funded by investors. First I carefully discuss the methodology, which sets up the linear regressions that (1) can be tested by the mean ROI of the loans they choose out of sample, and thus will be penalized for overfitting, (2) are trained on data that would not have been available at the time of the decision (3) uses automated feature selection, so that I, with the benefit of hindsight, don't choose which variables will be included.
+\subsection{Methodology}
+\subsubsection{Cross Validation Procedure}
+<<crossValexp, cache=FALSE>>=
+cval = data.frame('Sample'= c('Auction-Early.train', 'Auction-Early.test','Auction-Late-.train','Auction-Late.test',
+                             'Prosper-rate.train','Prosper-rate.test'),
+                 'Loans'= c(nrow(train),nrow(test),nrow(tr2),nrow(te2),nrow(tr3),nrow(te3)),
+                 'Start' =  c(min(train$Date),min(test$Date),min(tr2$Date),min(te2$Date),min(tr3$Date),min(te3$Date)),
+                 'End' =  c(max(train$Date),max(test$Date),max(tr2$Date),max(te2$Date),max(tr3$Date),max(te3$Date))) %>%
+  transform(Days = as.character(as.numeric(difftime(End, Start))), Start = as.character(Start), End=as.character(End))
+xtable(cval, label='cval', caption='This table documents number of loans and dates of the 6 samples used for training and testing regression strategies.')
+@
+The regime discontinuity splits the data into early auction, late auction and Prosper-rate regimes. To test our predictions out of sample, we split each of these thirds in half. For those familiar with cross validation, regressions are trained on the first half of loans originated under each regime, and tested on the second half. Table \ref{cval} describes the size and periods of the six sub samples. For those less familiar with cross validation, I now describe the six sub samples in words.
+\begin{enumerate}
+\item \Sexpr{nrow(train)} loans originated between April 21, 2006 and  October 2nd, 2007, are used to generate coefficients for the early auction regime regressions.
+\item \Sexpr{nrow(test)} loans originated after October 2nd, 2007, but before October 16, 2008, are used to test  the predictions of the early auction regime regressions. \footnote{Between October 10, 2008 and July 20, 2009, no loans are originated, because Prosper is in the SEC-imposed Quiet Period}
+\item \Sexpr{nrow(tr2)} loans originated between July 20, 2009 and  April 26, 2010, are used to generate coefficients for the late auction regime regressions. 
+\item \Sexpr{nrow(te2)} loans originated after April 26, 2010, but before December 17, 2010, are used to test the predictions of the late auction regime regressions.
+\item \Sexpr{nrow(tr3)} loans originated between Dec 20,2010 and April 28,2011  are used to generate coefficients for the Prosper-rate regime regressions.
+\item \Sexpr{nrow(te3)} loans originated between April 29,2010 and August 3rd 2011 are used to generate coefficients for the Prosper-rate regime regressions.
+\end{enumerate}
+
+\subsubsection{Avoiding Look-ahead Bias with Known-Default}
+Unfortunately, since our time series is so short, the challenge of training models on the limited information a lender would have is considerable; the early Auction regime starts in April 2006, and ends in October 2008, and all loans last 36 months, so in October 2007, an investor only knows 18 months of payment results of the earliest origination. To address this challenge, we develop a binary Known-Default variable. For a given loan, Known-Default equals 1 if the ex-post sum of the payments of a loan is less than the percentage of 36 months that had elapsed by the end of the training period.
+
+As an instructive example, suppose Bill borrows \$100 in April 2006, and that the training period ends December 2007.
+If Bill ends up paying back \$60 to investors over the full 36 months, his Known-default = 0 (even though he ended up defaulting) because the training period ends after 55.6\% of his three years have elapsed, but he paid back 60\% of his loan. If, however, Bill only ended up paying back \$50 to investors, Known Default=1, because Bill MUST have already missed at least one payment by the end of the training sample.
+
+Using Known-Default \footnote{It would be difficult to create known-ROI because there is no data on the magnitude of each monthly payment}  as our left hand side variable instead of observed defaults or ROI allows us to restrict the information available to models to the same set of information that investors had at their disposal at the end of the training sample, namely borrower characteristics of each loan that has already been originated, and whether it has \emph{already} gone into default. The downside to this approach is that for each period, many loans were originated in the month before the end of the training period, and almost none of these investors miss their first monthly payment. To avoid these young loans, about whose performance almost nothing is known, from exerting a large impact on the model's coefficients, I weight observations by \textit{observation maturity}, the amount of time that has elapsed between a loan's origination and the end of the training sample, in a weighted linear regression, using the training sample data.
+
+\subsubsection{Out of Sample Loan Selection}
+After training linear models to predict Known-Default, we use the coefficients to predict known-default as a proxy for real default, for each possible loan in the testing sample, and chooses the 10\% of loans from each credit grade with the lowest predicted default likelihood. \footnote{Loans are selected from each credit grade to ensure that strategies in the later periods can actually earn positive returns. Grade A loans in later periods return less than average.}
+\subsubsection{Summary of Procedure}
+For each regime \ldots
+\begin{enumerate}
+\item divide each regime into training and testing samples of equal size, with all loans in the training sample originated before the first loan in the test sample was originated.
+\item create variable Known-Default $= (0 || 1)$ for each loan, depending on whether an investor would have known that the loan defaulted at the end of the training sample.
+\item Start with 45 Features, select 8 that best predict Known-default.\footcite{leaps}\footnote{Feature selection was performed by selecting the best combination of 8 features out of 45, based on in-sample performance (scoring with Bayesian Information Criterion).}
+\item Run Logistic Regression to predict Known-Default using training period data and selected variables
+\item Using trained coefficients, generate predicted Known-Default values for loans in the test period.
+\item Select the 10\% of Loans from each credit grade with the lowest predicted Known-default probability.
+\item Compare ROI of selected loans against the  benchmark of a strategy that chooses every loan.
+\end{enumerate}
+
+\subsubsection{Assumptions}
+Two assumptions underly the out-of sample loan selection technique which selects from the pool of loans that were funded by Prosper's investors, at the rate they received. First, in the auction regime, by sucessfully bidding on a loan, investors may decrease the interest rate. This analysis assumes that a strategy does not move the interest rates of the loans it selects. Second, a strategy never chooses to fund loans that will end up unfunded, since we cannot observe their ROIs.
+\subsection{In Sample Results}
+<<runRegs,cache=FALSE>>=
+form1.sc = makeForm(bigReg1.sc,'def ~')
+form2.sc = makeForm(bigReg2.sc,'def ~')
+form3.sc = makeForm(bigReg3.sc,'def ~')
+
+log1.sc <- glm(form1.sc, data=train,family=binomial,weights=maturity)
+lm1.sc <- lm(form1.sc, data=train, weights=maturity)
+
+log2.sc <- glm(form2.sc, data=tr2,family=binomial,weights=maturity)
+lm2.sc <- lm(form2.sc, data=tr2,weights=maturity)
+
+log3.sc <- glm(form3.sc, data=tr3,family=binomial,weights=maturity)
+lm3.sc <- lm(form3.sc, data=tr3,weights=maturity)
+
+texreg(list(lm1.sc,lm2.sc,lm3.sc),custom.note='Y = Known-Default', label="KDLinear",
+       ,custom.model.names = c('Auction-Early','Auction-Late','Prosper-rate')
+       , caption='Coefficients extracted from Least Squares Regression to predict Known-Default in early auction, late auction, and Prosper-rate regime training data.',
+       scalebox=.8, digits=4, bold=.05)
+@
+The Linear Regression results shown in Table \ref{KDLinear} suggest that returns are much more predictable before the shutdown than after: the Adjusted $R^{2}$ for each regime's regression fall from \Sexpr{summary(lm1.sc)$adj.r.squared *100}\% for the early auction regime to
+\Sexpr{summary(lm2.sc)$adj.r.squared *100}\% for the late auction regime and 
+\Sexpr{summary(lm3.sc)$adj.r.squared *100}\% for the prosper rate regime. 
+The coefficients for all regressions are so close to zero because we are predicting Known-Default, which occurred in 11\% of Auction Regime, training sample observations, but only 1.5\% in the late auction regime training data and 1.0\% of observations in the Prosper-rate regime data. The discrepancy in Known-default rates is caused by both a shorter period of training data and a lower actual default rate for the later regimes.
+\subsection{Out of Sample Results}
+%Portfolios chunk has been removed. It can be found in draft0.Rnw. fitPlot and cvScores chunks has been removed. Check draft1.Rnw
+<<os.funcs,results='hide',cache=FALSE>>=
+os.ts.test<-function(reg,df, fg=10,str,cs=FALSE){
+  gb = if(cs) gb=group_by(df,mgroup,grade) else group_by(df,mgroup)
+  models <- gb %>% do(lns =  as.numeric(regTest(reg,., fg))) 
+  if (cs) mgroup = models[,c('mgroup','grade')] else mgroup = models$mgroup
+  result = cbind(mgroup,summarise_each(models, funs(meanUL,length,sdUL),lns))
+  result$model = str
+  return(result)
+}
+os.vec.test<-function(reg,df, fg=10,str,cs=FALSE){
+  gb = if(cs) gb=group_by(df,mgroup,grade) else group_by(df,mgroup)
+  models <- gb %>% do(lns =  as.numeric(regTest(reg,., fg))) 
+  return(unlist(models$lns))
+}
+  
+#os.rls test in draft3.Rnw
+os.base.test<-function(df,str,cs=FALSE){
+  gb = if(cs) gb=group_by(df,mgroup,grade) else group_by(df,mgroup)
+  result = summarise(gb, meanUL = mean(roi,na.rm=TRUE), length =length(roi), sdUL =sd(roi,na.rm=TRUE))
+  result$model = str
+  return(result)
+}
+@
+
+<<os.prep,results='hide',cache=FALSE>>=
+gr = TRUE
+res = rbind(os.ts.test(lm1.sc,test,1,'Regression',gr)
+,os.base.test(test,'Benchmark',gr)
+,os.ts.test(lm2.sc,te2,1,'Regression',gr)
+,os.base.test(te2,'Benchmark',gr)
+,os.ts.test(lm3.sc,te3,1,'Regression',gr)
+,os.base.test(te3,'Benchmark',gr))
+###REG STUFFgroup_by(x,regime,model)%>% summarise(sdev = sd(mn, na.rm=TRUE))
+v1 = os.vec.test(lm1.sc,test,1,'Regression',gr)
+v2 = os.vec.test(lm2.sc,te2,1,'Regression',gr)
+v3 =  os.vec.test(lm3.sc,te3,1,'Regression',gr)
+
+stats = data.frame(
+  'regime' = c('Auction-Early','Auction-Late','Prosper-rate')
+  ,'m.roi' = c(mean(v1),mean(v2),mean(v3))
+  ,'sd.roi' = c(sd(v1),sd(v2),sd(v3)))
+res = if(gr) filter(res, length >0 & grade != '') else res = filter(res2, length >0)
+res$regime = ifelse(res$mgroup <= dis0, 'Auction-Early',
+                    ifelse(res$mgroup <= dis1, 'Auction-Late','Prosper-rate'))
+hmeans  = res %>% group_by(regime,model) %>%  
+  summarise(mn = sum((1+meanUL) *length) / sum(length) -1)
+
+res.clean = res %>% group_by(mgroup,regime,model) %>% 
+  summarise(roi = (sum((1+meanUL) * length) / sum(length)) -1
+            , sdev=mean(sdUL), length=sum(length)) %>% transform(upper = roi+sdev, lower=roi-sdev)
+
+@
+
+<<retTab1,cache=FALSE,align='c'>>=
+msd =group_by(res.clean,mgroup,regime,model) %>% 
+  summarise(mn = mean(roi,na.rm=TRUE)) %>% 
+  group_by(regime,model) %>%
+  summarise(sdev = sd(mn, na.rm=TRUE))
+
+
+tab = inner_join(hmeans,msd,by=c('regime','model'))
+nd$t  = ifelse(nd$roi <0, 1,0)
+dr1 = group_by(nd, regime)  %>% summarise(d.rate = sum(t)/length(t))
+negfrac<-function(v1){return(length(v1[v1<0])/length(v1))}
+dr2= data.frame(dr1, 'lm.rate'=c(negfrac(v1),negfrac(v2),negfrac(v3)),stringsAsFactors = FALSE)
+
+fs= inner_join(filter(tab,model=='Benchmark')
+                ,filter(tab,model=='Regression')
+                ,by='regime')[c('regime','mn.x','sdev.x','mn.y','sdev.y')]
+fs2 = inner_join(fs,dr2,by='regime')
+colnames(fs2) = c('Regime','BM.mean','BM.sd','LM.mean','LM.sd','BM.default','LM.default')
+fs3 = cbind(fs2[1:3],fs2[6],fs2[4:5],fs2[7])
+fs3['Excess'] = fs3$LM.mean - fs3$BM.mean
+xtable(fs3,label='aggstats',
+       caption='The mean return and standard deviation of return of the loans selected by the Linear Model (LM) compared with all loans (BM for benchmark). BM.default and LM.default are the default rates of the relevant selected loans. Excess returns equals LM.mean - BM.mean', digits=3)
+
+if(FALSE){
+
+  fs2  = transform(fs2, ret = LM.mean - BM.mean, sd = LM.sd - BM.sd, def = LM.default - BM.default)
+  bmtab = fs2[c('Regime','BM.mean','BM.sd','BM.default')]
+  colnames(bmtab) = c('Regime','Mean ROI','St.Dev','Default rate')
+  lmtab = fs2[c('Regime','LM.mean','LM.sd','LM.default')]
+  colnames(lmtab) = c('Regime','Mean ROI','St.Dev','Default rate')
+  
+  diffs = fs2[c('Regime','ret','sd','LM.default')]
+  colnames(diffs) = c('Regime','Return','Variance','Default Rate')
+}
+
+@
+
+<<os.chart2,fig.cap="Strategy's Out Of Sample Performance for Each Month. Loan Selection Strategies described in Methodology section.",fig.width=10,fig.height=8>>=
+ggplot(res.clean, aes(x=mgroup,y=roi,color=model)) +
+  geom_line(aes(size=length)) + 
+  theme_bw() +
+  geom_hline(data = hmeans, aes(yintercept=mn,color=model), linetype='longdash') +
+  labs(x='Month', y='ROI', color='Model',title='Out of Sample Performance') +
+  scale_x_date(labels=date_format('%b-%y')) + 
+  theme(legend.position='bottom')+
+  facet_wrap(~regime, scales='free_x')+
+  scale_y_continuous(label=percent,limits=c(NA,NA),breaks=seq(from=-1, by=.05))
+@
+Table \ref{aggstats} shows the mean and standard deviation of the returns of the loans selected by the regression strategy.
+For the early auction regime, when investors focused less on hard variables, set low rates, and after observing high default rates among similar borrowers, the model beats the benchmark by 3\%, with similar variance\footnote{Variance is calculated as the standard deviation of monthly returns}. Moreover, a T test comparing the 1434 loans selected by the early auction regime model and the 13,923 loans it could have selected, rejects the Null hypothesis that the two groups have the same mean ROI at the .1\% significance level. This finding is inconsistent with the EMH prediction that it should be impossible to earn excess returns using publicly available information. As discussed in the methodology section, the model is trained on the observed defaults in the training sample, and chooses the loans its predicts to have the lowest probability of default. As such it ends up minimizing the riskiness of loans it selects, rather than trying to optimize a risk reward calculation. Early auction period loans selected by the model have a default rate of 21\% , compared to the 32\% default rate for all loans.  Figure \ref{fig:os.chart2}, which compares the various strategies out-of-sample performance over time, reveals that most of the model's outperformance is during the initial 6 months of testing.
+
+For the late auction regime, when investors largely used the ratings prosper gave them to form interest rates, the model beats the benchmark by 5.8\%, with slightly higher standard deviation.  A T test comparing the 360 loans selected by the late auction regime model and the sample of 3569 loans it chose from rejects the hypothesis that the two groups have the same mean ROI at the 1\% significance level. It is again clear that the superior returns of the loans chosen by the model were generated by a lower default rate: 7.8\% compared to 13.0\% for the full basket of loans. This result should interpreted carefully, however, given the noticeably higher variance and small number of selected loans. 
+
+For the Prosper-rate regime, when Prosper set interest rates, the model is unable to beat the benchmark: it chooses loans with worse ROI, higher default rate and identical returns. 
+
+In summary, over the inital two regimes where investors are involved in the process of setting interest rates, via auction, it is possible to use publicly available information to earn excess returns. In the final regime, where the central planner sets the interest rate, it is much more difficult, if not impossible, to earn excess returns using publicly available information. 
+
+\subsection{Methodological Expansions}
+An expansion of this project could retrain the model every month with the benefit of newly observed defaults and newly originated loans, and expect performance improvements.
+
+Engineering a known-roi dependent variable that equals the percentage of expected repayment of principal an investor received from each borrower up to the relevant date, would allow the model to make risk-reward calculations when deciding between loans, as opposed to just choosing the least risky loans.
+
+<<retTab2,cache=FALSE,eval=FALSE>>=
+vmeans = res %>% group_by(regime,model,grade) %>%  
+  summarise(mn = sum((1+meanUL) *length) / sum(length) -1, n=sum(length))
+
+bm = filter(vmeans, model=='Benchmark'); rm = filter(vmeans, model=='Regression')
+csdiffs = inner_join(bm,rm, by=c('grade','regime')) %>% transform(delta = mn.y - mn.x)
+excess = spread(csdiffs[c('regime','grade','delta')], grade,delta)
+excess = cbind(excess[1],excess[3], excess[c(-1,-3)])
+xtable(excess,label='excess',
+       caption='The excess returns earned by each regression model on loans in each Credit grade'
+       , digits=3)
+@
+<<os.chart3,cache=FALSE,fig.height=8,fig.width=10, fig.cap='The rois of the loans selected by Each strategy by Credit Grade and Regime. Dotted lines indicate means. For example, In the Prosper-rate (2nd) column in the D (5th) row, the green distribution represents the ROIs of all the Grade D loans selected by the Linear Model',eval=FALSE>>=
+ggplot(res, aes(x=meanUL,fill=model))  + geom_density(alpha=.7) +
+  facet_grid(grade ~ regime, scales='free') + 
+  theme_bw() +
+  geom_vline(data = vmeans, aes(xintercept=mn,color=model)) +
+  labs(x='ROI', y='Density', fill='Model',title='Out of Sample Performance')+
+  scale_y_continuous()+
+  scale_x_continuous(label=percent, limits = c(-.5,NA))
+@
+
+\section{Controlling for Time Period}
+<<rateSim,  results='hide', cache=FALSE>>=
+crate<-filter(rateDiff, CreditScoreEst > 600 & regime=='Auction-Late')[c('CreditScoreEst','meanRate')]
+dup = left_join(o1, crate, by='CreditScoreEst')
+dup$oldrate = dup$LenderYield
+dup$LenderYield = dup$meanRate
+dup = filter(dup,!is.na(LenderYield))
+dup$roi = (dup$roi + 1) * ((1 + dup$LenderYield)/(1+ dup$oldrate)) -1
+dup$regime='Auction-Early.Adj-rate'
+dup = filter(dup,!is.na(roi))
+k3 = c('CreditScoreEst','LenderYield','roi','TotalInquiries','regime','TotalProsperPaymentsBilled')
+wfake = rbind(old[k3],dup[k3]) %>% 
+  filter(CreditScoreEst > 640 | (CreditScoreEst >600 & TotalProsperPaymentsBilled>0))
+decomp <- summarise(group_by(wfake, CreditScoreEst, regime)
+                    ,meanRate = mean(LenderYield)
+                    ,medRate = median(LenderYield)
+                    ,meanRoi = mean(roi)
+                    ,medRoi = median(roi)
+                    ,meanInq=mean(TotalInquiries,na.rm=TRUE)
+                    ,num = length(roi)) %>% 
+  transform(err = ifelse(regime=='Auction-Early.Adj-rate', .02, 0))
+if(FALSE){
+  mm4  = filter(nd, CreditScoreEst == 649.5) %>%
+    group_by(regime) %>% summarise(mdef = mean(defaulted,na.rm=TRUE)
+                                   , mRoi = mean(roi, na.rm=TRUE)
+                                   , mRate = mean(LenderYield, na.rm=TRUE)
+                                   , numLoans=length(roi)
+                                   , dollars = sum(LoanOriginalAmount) / 1000000
+                                   , mInq = mean(TotalInquiries,na.rm=TRUE)) %>% filter(numLoans > 5)
+  
+}
+@
+The first two inconsistencies with EMH predictions: that early auction regime loans have negative average ROI, and that riskier early auction regime loans earn investors negative ROI, are both vulnerable to time period. Specifically, maybe the early period just happened to be bad for loan repayments. In this section, I aim to show that the decisions made by early investors, namely to lend to low credit borrowers and to demand far lower interest rates than hard variables would suggest, partly explain the difference in ROI. Thus, the question guiding this section is: \textbf{what would have happened to investor returns in the early auction regime if investors only lent to borrowers that would have qualified for loans in the late auction regime, and demanded the rates charged by investors in the late auction period?} This will help to understand whether the change in returns between the early and late auction regimes was merely a consequence of an unpredictably higher default rate.
+
+\subsection{Methodology}
+In order to estimate the hypothetical returns in an early auction regime where investors charged late auction regime rates to borrowers who would have met the late auction regime criteria, we must reduce early auction borrowers to the subset that would have been acceptable in the late auction regime, estimate what interest rate late auction regime investors would have charged them, and then use this estimated rate to predict a new ROI.
+
+The first step, restricting the borrower pool, is simple. In the late auction regime, Prosper required that new borrowers  have a credit score greater than 640, and that returning borrowers have  a credit score greater than 600 in order to apply for a loan. Applying this rule reduces the number of early auction regime loans whose rate we will adjust by 40.4\%, from 27,764 to 16,545. \footnote{This may not go far enough, as late auction regime investors refused to fund many borrowers applications.}
+
+The second step of the method involves finding the hypothetical interest rate an early auction regime borrower would have paid in the late auction regime. For simplicity, this \emph{adjusted rate} is computed by finding the median interest rate paid by late auction regime borrowers in the same credit score bucket, \textit{EG} 700-720.
+
+I then predict what the loan's ROI would have been if the borrower had paid that adjusted rate by multiplying the payments the borrower made under the old regime by the ratio of $\frac{(1 + adjusted rate)}{(1 + old rate)}$.
+
+As an instructional example, suppose Bill is an early auction regime borrower in the 700-720 credit score bucket.
+Under the early-auction regime, Bill borrowed \$100 from investors at a 13\% interest rate, and returned \$113, over the one year course of his loan. \footnote{Neither maturity nor principal matter, for our purposes}
+
+In the late auction regime, the median borrower 700-720 borrower paid 23\% interest, 
+so, Bill's Adjusted-Rate is 23\%.
+To calculate Bill's Adjusted ROI, we multiply Bill's Actual ROI by the ratio of the interest rates.
+\begin{equation}
+ADJ.ROI = \frac{Payments}{Amount.Borrowed} * \frac{ADJ.Rate}{Actual.Rate}
+\end{equation}
+\begin{equation}
+ADJ.ROI= \frac{113}{100} * \frac{1.23}{1.13} - 1 = 23\%
+\end{equation}
+
+Suppose, alternatively, Bill had repaid only \$45. So Bill's actual ROI was -55\%.
+In this second case, Bill's Adjusted ROI = $\frac{45}{100} * \frac{1.23}{1.13} - 1 = - 51\%$.
+\subsubsection{Assumptions}
+Three assumptions facilitate this methodology, but also cause bias.
+Most importantly, the methodology ignores the idea of cost-induced default, as discussed by (Stiglitz and Weiss, 1976):
+first, forcing the borrower to pay more per month might push him over the default tipping point.\footcite{credit}
+Empirical validation of this theory can be found in (Wei and Lin, 2013)'s examination of Prosper's transition from the late auction regime to the Prosper-rate regime, which shows that when borrowers were assigned higher interest rates, they defaulted more frequently. With this in mind, my adjusted ROI serves as an \textbf{upper bound} for the possible ROI because it assumes that each borrower makes the same number of payments, even though each payment is higher. More realistically, we might expect Bill to make fewer payments on his loan if he found it difficult to afford his interest rate.
+
+Two other assumptions work in the other direction, however. First, we have assumed that all applications that satisfied Prosper's minimum borrower standards would have been funded by investors. In reality, many applications met the criteria but were not funded. Secondly, we have assumed that in our hypothetical world early auction regime borrowers would pay the same rate as late auction regime borrowers in their credit bucket. In reality, however, they would probably pay higher rates, because controlling for credit score bucket, they have worse average delinquencies, credit card utilization and other hard variables that would be used for grading. 
+
+To summarize, the total.ROI reported using the adjusted borrower population is probably a little lower than it should be, and the total.ROI reported using adjusted interest rates is probably higher than it should be.
+
+\subsection{Results \& Discussion}
+<<adjfig, cache=FALSE, fig.cap='This chart displays the results of our rate-adjustment experiment. The blue line is the result of our rate-adjustment experiment, and displays the hypothetical ROI if late auction regime borrowers had paid early auction interest rates.'>>=
+ggplot(decomp, aes(x=CreditScoreEst, y=meanRoi, color=regime)) +
+  #geom_line(aes(x=CreditScoreEst, y=meanRoi, color=regime, size=num)) +
+  geom_point(aes(size=num))+
+  geom_smooth(aes(ymax=meanRoi, ymin=(meanRoi - err)),stat='identity') +
+  theme_bw() +
+  labs(x='Estimated Credit Score', color='Regime', y='Mean ROI',size='Number of Loans', title='Rate Adjustment Results')+
+  xlim(640,900)
+@
+Figure \ref{fig:adjfig} documents the relationship between credit score bucket and returns for early auction regime, late auction regime, and late auction regime borrowers with adjusted rates, where the rate adjustment and subsequent ROI adjustment was computed using the \emph{upper bound} methodology described above. At low credit scores, where the difference in interest rates between the two regimes is largest, the gap in ROI is also the largest.\footnote{The grey cloud is 2\% error, in the right direction. I could improve on this by trying to quantify the effect of a 1\% increase in rate for similar borrowers on default.} With adjusted rates, the inconsistency with EMH, where riskier assets had lower average return, is reversed, as well as the negative average return inconsistency. 
+With adjusted interest rates, early auction regime borrowers earn higher average returnson riskier loans, and positive average returns overall.
+
+<<adjTab, cache=FALSE>>=
+entry = data.frame(regime='Auction-Early',total.ROI= mean(o1$roi),stringsAsFactors = FALSE)
+adj.tab = group_by(decomp,regime) %>% 
+  summarise(total.ROI = sum((1 + meanRoi)*num) / sum(num) -1) %>% 
+  transform(regime = ifelse(regime=='Auction-Early','Auction-Early.Adj-borrowers',as.character(regime))) %>%
+  rbind(entry) %>% arrange(total.ROI)
+xtable(adj.tab, caption='The aggregated results of the Rate Adjustment Experiment.', label='adj',digits=4)
+@
+At each credit score, an upper bound estimated of the fraction of the ROI gap that would be accounted for by adjusted interest rates can be measured as:
+\begin{equation}
+rate.factor = \frac{mean(adj.roi)-mean(early.roi)}{mean(late.roi)-mean(early.roi)}
+\end{equation}\footnote{Visually, think of it as if we are walking up the plot from the red line to green line,  what percentage of the way would we make it before we encountered the blue line.}
+This \emph{rate factor} is, by construction, heavily correlated with the difference in interest rates for each regime.   At the lowest included estimated credit score, 649.5, the difference in average interest rate is 9.3\%, and that difference explains 42.1\% of the 19.2\% difference in average ROI. At the higher buckets, the difference in interest rates for borrowers in the 800-820 credit score bucket was 0.3\%, and this difference explained only 3\% (not half) of the 6\% difference in average ROI.
+<<rateSimResults, cache=FALSE,eval=FALSE>>=
+auc = filter(decomp, regime=='Auction-Early')
+adj = filter(decomp, regime=='Auction-Early.Adj-rate')
+pr = filter(decomp, regime=='Auction-Late')
+cs = inner_join(auc,adj, by='CreditScoreEst') %>% inner_join(pr,by='CreditScoreEst')
+
+cs.tab =  cs %>% mutate(delta.1 = meanRoi.y - meanRoi.x
+                        ,delta.2 = meanRoi - meanRoi.y
+                        ,delta.3 = meanRoi -meanRoi.x
+                        ,rate.factor =delta.1/delta.3
+                        ,delta.rate = meanRate - meanRate.x)
+@
+The aggregated returns of the regimes, as shown in Table \ref{adj}, indicate that if early auction regime borrowers had self enforced the minimum standards Prosper introduced in the second period, investor returns would have improved by at least 2.8\%. If investors had charged these borrowers the rates similar borrowers were charged in the late auction regime, returns might have improved by another 5.75\%.
+
+These results suggest that although much of the difference in performance between regimes is due to an especially bad time period, roughly $\frac{1}{3}$ of the difference in returns between the early auction and late auction regimes can be explained by poor investor decisions.
+
+\section{Conclusion (unfinished)}
+ EMH predicts that (1) risky assets should have positive expected returns, (2) riskier assets should have higher expected return than less risky assets and (3) it should be impossible to use publicly available information to earn excess returns. The previous sections document evidence that rejects all three of these predictions, as well as evidence that the inconsitencies with EMH were diminished and then removed as Prosper took more control of the rate-setting process. I conclude by offering alternative framings of the central planner as a market guiding, rather than disrupting force.
+\newpage
+\printbibliography
+\end{document}
