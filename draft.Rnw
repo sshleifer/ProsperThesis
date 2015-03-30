@@ -1,5 +1,6 @@
 \documentclass[12 pt]{article}
 \usepackage{graphicx, verbatim}
+\usepackage{chronosys}
 \usepackage{float}
 \usepackage{subfig}
 \usepackage{url}
@@ -282,14 +283,7 @@ Prosper.com data provide some additional valuable insights into investor behavio
 Additionally, for regimes (2) and (3), subprime borrowers are not allowed to
 apply for Prosper loans.
 
-The early auction regime is closest to Hayek's vision of the free market, since
-interest rates are determined freely by investors through auctions, with few
-limitations on which borrowers they can invest in.
-I find that it is precisely in this free-market regime that the three
-predictions of the EMH are contradicted.
-In the two later regimes, when Prosper first provides much more guidance to investors, and then actually sets interest rates, investor returns improve dramatically.
-The evidence across regimes is broadly inconsistent with the view that local knowledge and the wisdom of the crowd improves price discovery.
-To the contrary, it appears that a "centralized' Prosper mechanism of either guiding or setting interest rates actually leads to fewer predictable mispricings: as Prosper becomes more involved in the rate-setting process, the excess returns available using publicly available information approach 0, while aggregate returns exhibit higher mean and lower variance.
+A comparison of loan performance in different regimes allows me to consider two contrasting views of how an internet marketplace such as Prosper works.  One view, closely linked to Hayek, suggests that the marketplace would work best with minimal intervention from the market maker Prosper, so many individual lenders incorporate their private knowledge and information in the determination of the interest rate.   An opposing view would hold that individuals are not sophisticated or knowledgeable enough to assess loan risk, and some guidance or even interest rate setting from the market maker Prosper would improve loan performance.  The evidence on loan returns in the three regimes points quite clearly in favor of the market maker hypothesis, and against Hayek: as Prosper becomes more involved in the rate-setting process, the excess returns available using publicly available information approach 0, while aggregate investor returns exhibit higher mean and lower variance.
 
 A major confound of this analysis is the time period. Perhaps 2006-2008, the
 early auction period, is just a bad time to invest in consumer credit, whereas
@@ -339,8 +333,9 @@ basis of a borrower's credit history.
 
 Under all three regimes, lenders could choose to whom to lend and how much to
 lend, allowing them to diversify across many loans, thereby decreasing the
-variance of their returns. Before a potential borrower's listing is posted on
-the website, Prosper authenticates their social security number, driver's
+variance of their returns. The minimum investment in a loan was \$25, with no
+maximum, and lenders could hold as many loans as they wished.
+Before a potential borrower's listing is posted on the website, Prosper authenticates their social security number, driver's
 license and address, and pulls the borrower's credit history from Experian,
 which includes credit score, total number of delinquencies, current
 delinquencies, and many other historical credit variables.\footcite{freedman} 
@@ -353,6 +348,37 @@ Lenders are also charged a servicing fee of 0.5-1\%. There are no prepayment pen
 This rate is lower than that charged by most traditional financial institutions, which have the higher costs of physical branches, and pay for human analysis of credit history.\footcite{hanson}
 The P2PL model relies on lenders being able to infer the riskiness of borrowers: since Prosper gets fees from monthly payments, they too are incentivized to maximize investor returns, both for short term profit, and long term reputation.\newline
 
+\iffalse
+\begin{table}
+  \renewcommand\arraystretch{1.4}\arrayrulecolor{LightSteelBlue3}
+  \captionsetup{singlelinecheck=false, font=blue, labelfont=sc, labelsep=quad}
+  \caption{Timeline}\vskip -1.5ex
+  \begin{tabular}{@{\,}r <{\hskip 2pt} !{\foo}
+    >{\raggedright\arraybackslash}p{5cm}}
+    \toprule
+    \addlinespace[1.5ex]
+    1947 & AT and T Bell Labs develop the idea of cellular phones\\
+    1968 & Xerox Palo Alto Research Centre envisage the 'Dynabook\\
+    1971 & Busicom 'Handy-LE' Calculator\\
+    1973 & First mobile handset invented by Martin Cooper\\
+    1978 & Parker Bros. Merlin Computer Toy\\
+    1981 & Osborne 1 Portable Computer\\
+    1982 & Grid Compass 1100 Clamshell Laptop\\
+    1983 & TRS-80 Model 100 Portable PC\\
+    1984 & Psion Organiser Handheld Computer\\
+    1991 & Psion Series 3 Minicomputer\\
+  \end{tabular}
+\end{table}
+\fi
+\iffalse
+\startchronology
+[startyear=2006,stopyear=2011,height=1ex,width=\hsize]
+\chronoevent{0}{Jan 13 Quiz 1}
+\chronoevent{8}{Jan 20 Quiz 2}
+\chronoevent{36}{Feb 17 Quiz 6}
+\chronoevent{36}{Intervention}
+\stopchronology
+\fi
 In my sample, Prosper's origination volume, as shown in Figure \ref{fig:origTime}, peaked in the months before the shutdown, and then slowly resumed after the quiet period. Since 2011, when the sample ends, origination volume has eclipsed its 2008 peak.\newline
 <<origTime, cache=FALSE, fig.cap='This chart shows two panels. The first panel shows the number of Loans funded on Prosper in each month of the sample. The second panel shows the total dollars lent to borrowers in each month of the sample.', fig.height=4>>=
 g2 = group_by(nd, mgroup, regime) %>%
@@ -372,7 +398,7 @@ ggplot(g2, aes(x=mgroup,fill=regime)) +
 
 <<catsTab, cache=FALSE>>=
 catTab = filter(nd, purpose != "NA") %>% count(purpose, sort=TRUE) %>% mutate(Frequency = n/sum(n))
-xtable(catTab, digits=3, label='catTab', caption = "Stated Reasons for Borrowing on Prosper (NAs removed)")
+xtable(catTab, digits=3, label='catTab', caption = "Stated Reasons for Borrowing on Prosper (2006-2001). NAs removed")
 @
 
 Reasons for borrowing on Prosper, as shown in Table \ref{catTab}, have changed relatively little over the site's 8 year history: the plurality of borrowers aim to consolidate credit, while fewer use the funds to start a business, or pay for a wedding or a car.
@@ -411,16 +437,24 @@ Besides credit score, Prosper began using (and still uses) the following ``Key v
 \item Loan payment performance on prior Prosper loans.
 \end{itemize}
 This Auction rate-setting mechanism continued for more than a year after the shutdown, until December 20, 2010.
+
+Unsuprisingly the automated feature selection procedure in section 5, which
+identifies the subset of variables that best predict default finds that
+Credit Score, inquiries, delinquencies and number of credit cards are all useful
+variables for predicting default.
+
 \subsection{Prosper-rate Regime}
 Under the current \emph{Prosper-rate} model, enacted December 21, 2010, lenders no longer determine the loan rate in an auction. Instead, Prosper uses the intelligent credit grades given to investors in the late auction regime to set interest rates on loans, with slightly less stringent under-writing standards to determine eligibility. The change was motivated by a desire to accelerate the listing process, so that investors could reinvest money more quickly. Moreover, towards the end of the late auction regime, auctions were arriving at interest rates that were almost completely determined by the credit score. Under the fixed-rate regime, investors choose whether or not to invest in a given loan, at the interest rate set by Prosper, so bids only consist of a dollar amount.\newline
 
 \section{Literature}
 \subsection{Efficient Markets Hypothesis}
 In layman's terms, the efficient markets hypothesis (EMH), states that 'it is impossible to beat the market.' More specifically, Fama explains that market prices should always fully reflect publicly available information. Therefore, EMH rules out the possibility of strategies that earn excess returns using only publicly available information. \footcite{fama}
-In the P2P lending context, this market price is the interest rate determined by investors (or accepted by investors in the fixed-rate regime), and paid by the borrower, and returns are the cash flows received from borrowers divided by the amount invested.
+In the P2P lending context, this market price is the interest rate determined by
+investors (or accepted by investors in the fixed-rate regime) at origination
+time, and paid by the borrower, and returns are the cash flows received from borrowers divided by the amount invested.
 (Fama, 1970) notes the dependence of most tests of market efficiency on a model of risk and return.
 The models, including most famously, Sharpe's capital asset pricing model ('CAPM'), make two predictions:
-First,  since an investor can always hold cash, the average return on risky investments must be positive. Second, securities with higher systematic risk earn higher average returns.\footcite{sharpe}
+First,  since an investor can always hold cash risklessly, the average return on risky investments must be positive. Second, securities with higher systematic risk earn higher average returns.\footcite{sharpe}
 
 The EMH rests on three assumptions. ``First, investors are assumed to be rational and hence to value securities rationally. Second, to the extent that some investors are irrational, their decisions are random and uncorrelated. Third, to the extent that some investors are irrational in similar ways, they are met in the market by rational arbitrageurs, who eliminate their influence on prices." \footcite{as}
 
@@ -431,7 +465,11 @@ In a reverse interest rate auction, such as Prosper's market design, however, ar
 The novel idea of P2P is a large group of investors may be better equipped to assess risk than traditional financial institutions. ``Traditionally, the credit score provided by rating agencies has been the main tool banks use to screen smaller borrowers."\footcite{iyer} As such, the initial strand of literature focuses largely on the novel sources of information utilized by P2P investors.
 (Gao and Lin, 2012) analyze the text written by the borrower in the ``description field" of the application, and find that descriptions that are easy to read have 2.3\% lower default rates than average, while complex narratives are associated with a 3.6\% higher default rate, but do not analyze return on investment.\footcite{gao} Pope and Sydnor (2008) find that investors can reduce their defaults by statistically discriminating against racial minorities, but do not analyze return on investment. (Iyer et. al,2009) find that within the credit score buckets provided by Prosper, investors use soft information to further sort borrowers within buckets, reducing defaults.\footcite{iyer}
 
-These papers echo Hayek (1945)'s basic argument for market efficiency: that many individuals, each using their own information, collectively arrive at one efficient price.  The right price ``might have been arrived at by one single mind possessing all the information which is in fact dispersed among all the people involved in the process." \footcite{hayek}
+These papers echo Hayek (1945)'s basic argument for market efficiency: that many
+individuals, each using their own information, collectively arrive at one
+efficient price.  The right price ``might have been arrived at by one single
+mind possessing all the information which is in fact dispersed among all the
+people involved in the process." \footcite{hayek} 
 
 Freedman and Jin (2008) are more focused on the failures of the auction regime,
 Although the main focus of their paper is the role of soft information and
@@ -439,7 +477,8 @@ social networks on Prosper, they also study how investors learn to weight these
 different variables, and confirm the finding of negative expected returns in the
 early auction regime: ``lenders, especially those that joined
 Prosper early, did not fully understand the market risk. We estimate, on
-average, Lenders would have expected an internal rate of return of -.62\% to
+average, Lenders would have expected an internal rate of return of between
+-.62\% and
 1.38\% if they had correctly understood the risk distribution of Prosper
 loans.''``Vigorous'' lender learning, they argue, explains the increase in interest
 rates and borrower creditworthiness, and associated increase in lender
@@ -454,12 +493,12 @@ informative credit grades. Instead of investor learning as the catalyst that led
 to a more efficient market, I frame Prosper's rule changes as catalysts that
 force investors to make better decisions.
 
-Rather differently than Hayek, I find that when investors are left on their own
+Rather differently than Hayek theorizes, the data suggest that when investors are left on their own
 to set prices, markets are not nearly as efficient as the prices set by ``a
 single mind'', that aggregates the data. Furthermore, as interest rate setting
 becomes more centralized, interest rates are more sensitive to the hard credit variables
 that actually predict default.
-t and other unused citations can be found in hypo.cut.tex
+%t and other unused citations can be found in hypo.cut.tex
 
 \section{Data}
 My sample consists of 39,555 three year, unsecured (no collateral) Loans, worth
@@ -496,7 +535,7 @@ names(d5) = d4[1,]
 d6 = d5[-1,]
 xtable(d6,caption='Means and Standard Deviations for Relevant Variables by Regime.',digits=3, label='sumStats')
 @
-For each loan, Prosper offers 63 interesting variables, I now define an important subset.
+For each loan, Prosper offers 63 variables, I now define an important subset.
 \begin{itemize}
 \item BorrowerRate: Annual interest rate paid by the borrower
 \item TotalCreditLinespast7years: Number of credit lines, including cards and loans, used by the borrower in the seven years before the prosper loan was originated.
@@ -542,15 +581,7 @@ I do not discount or annualize ROIs, because in the period of low interest
 rates, the difference between default and repayment is large enough that a few
 percentage points don't matter: loans that default average -46\% ROI, loans that
 repay average + 24\% ROI. Furthermore, my ROI results are very similar as Freedman
-and Jin's, who use discounting.\footcite{freedman}
-
-\subsection{Prosper's Charged-Off vs. Default Terminology}
-\footnote{remove this part?}
-After the shutdown, Prosper began using the term ``Charged-Off" to mean that a loan is delinquent past 120 days. We observe more defaults than charge-offs before the shutdown, but more charge-offs than defaults after, likely because of the shift in terminology. According to Prosper's website:
-\begin{quote}
-In general, a debt or account is considered “charged off” when it is unlikely that further payments will be received. Debts are usually charged off after they remain unpaid for a period of time (e.g., 90 to 180 days). Prosper uses the 120 days as the charge off threshold because loans that become over 120 days past due are eligible for sale to a debt buyer, and we have found that there is a steep drop-off in likelihood of further payments after 120 days of delinquency.
-\footnote{\url{http://blog.prosper.com/2008/09/16/charge-offs-explained/}}
-\end{quote}
+and Jin's, who use discounting.\footcite{freedman} %TODO(SS): CITE FED RATES
 
 The rest of this paper documents my results, which are split into three sections.
 Section 4 presents facts about the performance of loans across regimes which
@@ -568,15 +599,23 @@ interest rates, the two features that largely determine returns.
 The discussion of interest rates includes measurement of investors' varying sensitivity to risk
 across regimes. The section closes by examining the impact of Prosper's interventions, which reduce the valid borrower pool to a less-risky subset and assign borrowers more informative credit grades, on investor returns. 
 
-I find the following: (1) the mean ROI of early auction regime loans is negative, (2) in the early auction regime, average ROI is lower for higher risk loans, (3) interest rates are insufficiently sensitive to risk in the early auction period and (4) investors made sub-optimal choices, given the information they had at their disposal, and (5) Prosper's interventions improved investor returns.
+I find the following: (1) the mean ROI of early auction regime loans is
+negative, (2) in the early auction regime, average ROI is lower for higher risk
+loans, (3) interest rates are insufficiently sensitive to risk in the early
+auction period and (4) investors made sub-optimal choices, given the information
+they had at their disposal, and (5) In the period when Prosper intervened,
+interest rates and investor returns were much higher, and part of the increase
+is likely due to Prosper's intervention.
 
-These findings suggests that although investors were extraordinarily unlucky in
+These findings suggests that although investors were unlucky in
 the early auction regime, they made avoidably bad decisions that hurt their
 returns. More specifically,
 Finding (1) is inconsistent with the EMH prediction that risky assets like Prosper loans should offer investors a positive expected return.\footnote{Otherwise, investors would just hold cash.}
 Finding (2) is inconsistent with the prediction that riskier loans should have higher expected returns to compensate investors for taking risks.
 Finding (3) describes the sub-optimal investor decisions that led to (1) and (2), in response to arguments that investors chose an unlucky time period.
-Finding (4) is inconsistent with Hayek's notion that a free market will arrive at accurate prices without the meddling of a central planner.
+Finding (4) is inconsistent with Hayek's notion that a free market will arrive
+at accurate prices that reflect the information available to market
+participants,without the meddling of a central planner.
 
 As the default data demonstrate, Finding (3) is only partially responsible for
 Findings (1) and (2); investors were incredibly unlucky to have chosen to invest
@@ -661,18 +700,18 @@ ggplot(rateDiff, aes(x=CreditScoreEst, y=meanRoi,size=num,color=regime))+
   geom_line() +
   theme_bw() +
   xlim(500,900) + 
-  scale_y_continuous(labels=percent) +
+  scale_y_continuous(labels=percent, limits=c(-.3,NA)) +
   labs(title='Estimated Credit Score vs. ROI',x= 'Estimated Credit Score'
        , y='Mean ROI',color='Regime',size='Number of Loans')
 #Total Inquiries, other cluster vars.
 @
 
-Figure \ref{fig:roivscore} shows that higher risk loans earn lower returns in the early auction regime, inconsistent with the EMH prediction of a risk, reward tradeoff.
+Figure \ref{fig:roivscore} shows that lower credit score loans earn lower returns in the early auction regime, inconsistent with the EMH prediction of a risk, reward tradeoff.
 The expected pattern is shown in later two regimes' curves: riskier loans earn higher average returns. Figure \ref{fig:roivscore} also reveals early auction regime returns are worse than the other two regimes' returns for each bucket, but that the gap is much greater for riskier loans. Again, time period may be a confounding factor, as riskier investments often perform worse in bad economic times, a possibility I discuss later.
 We now examine default rates and interest rates, the two features that explain the variation inreturns.
 
 \subsection{Interest Rates and Defaults Across regimes}
-<<ratevtime,cache=FALSE,fig.height=3, fig.cap="The blurred lines show the median interest rate of loans originated each month. The solid lins represent the median rate for loans to borrowers in the 640-660 credit score bucket for each month. Loans funded after the shutdown are associated with higher rates after controlling for borrower credit score bucket.">>=
+<<ratevtime,cache=FALSE,fig.height=3, fig.cap="The blurred lines show the median interest rate of loans originated each month. The solid lines represent the median rate for loans to borrowers in the 640-660 credit score bucket for each month. Loans funded after the shutdown are associated with higher rates after controlling for borrower credit score bucket.">>=
 ggplot() +
   geom_line(aes(x=mmeans$mgroup, y=mmeans$mRate, size=mmeans$numLoans, color=mmeans$regime),alpha=.5) + 
   geom_line(aes(x=mm3$mgroup, y=mm3$mRate, size=mm3$numLoans, color=mm3$regime)) + 
@@ -741,7 +780,7 @@ a3 = filter(d2, regime=='Prosper-rate')[c('CreditScoreEst','dr')]
 colnames(a3) = c('CreditScoreEst','Prosper-rate')
 ds.tab = left_join(a1, inner_join(a2,a3, by='CreditScoreEst'), by='CreditScoreEst') %>% filter(CreditScoreEst > 600 & CreditScoreEst < 880)
 colnames(ds.tab)[1] = 'Credit Score Bucket'
-xtable(ds.tab, label='ds.tab', caption='Default rates for borrowers in each credit score for each regime. Credit score buckets are denoted by their midpoint. EG, the 600-619 bucket is in the first row, 609.5. Each column then represents the default rates borrowers in the (column name) regime, in the (row-name) credit bucket. Default rates are much higher for the early auction regime, especially among risky borrowers. This data underlies the previous figure. Early auction regime borrowers in buckets below 500 were removed to save space, but have even higher default rates.')
+xtable(ds.tab, label='ds.tab', caption='Default rates for borrowers in each credit score for each regime. Credit score buckets are denoted by their midpoint. EG, the 600-619 bucket is in the first row, 609.5. Each column then represents the default rates borrowers in the (column name) regime, in the (row-name) credit bucket. Default rates are much higher for the early auction regime, especially among risky borrowers. This data underlies the previous figure. Early auction regime borrowers in buckets below 500 have even higher default rates.')
 @
 Lower sensitivity to credit scores, and total disregard for differences in
 credit score below 600 did not work out well for early auction regime investors,
@@ -814,9 +853,10 @@ xtable(rf2, label='ratefit2',caption= 'This table documents how much of the vari
 @
 The tension between the importance of the credit score in the credit grade and the importance of the credit score in the interest rate is resolved by the fact that credit grades are much more predictive of interest rates in the later two regimes. As shown in Table \ref{ratefit}, whose \emph{Fit} column shows the fraction of the variance in interest rate that can be described by variance in hard credit variables, as measured by the adjusted $r^{2}$ of a regression with interest rate as the dependent variable and credit score bucket, current delinquencies and credit grade as independent variables. This regression yields adjusted $r^{2}$ of 48\%, 88\% and 97\% for the early auction, late auction and Prosper-rate regimes, respectively, suggesting that Prosper's more informative grades are immediately used by borrowers to determine interest rates. \footnote{The full regression results are available in the appendix. (TODO)}
 
-Adversaries may argue that since we do not know Propser's exact grading formula, it may include information that was not previously available to borrowers.Table \ref{ratefit2} addresses this argument, by running the same procedure as Table \ref{ratefit}, but with only credit score bucket as an independent variable. The direction of the results is the same: Prosper's change to more informative grading did not only lead to a larger role for those grades in investors' interest rates, but increased the weight of credit score bucket, a variable that investors had access to in the same format in both periods. If the crowd of investors were as wise as Hayek theorizes, Prosper's repackaging of multiple variables into a more informative credit grade should not affect the weight of hard information in investors' risk estimates. Furthermore, Figure \ref{fig:defvscore} makes is clear that investors would have experienced fewer defaults, and thus earned higher returns, if they had used credit buckets more heavily in their risk assessments, given the poor returns associated with low credit borrowers. We can thus interpret some of the poor returns of the early auction regime to a lower level of reliance on hard information. 
+Since we do not know Propser's exact grading formula, it may include information
+that was not previously available to borrowers. Table \ref{ratefit2} addresses this argument, by running the same procedure as Table \ref{ratefit}, but with only credit score bucket as an independent variable. The direction of the results is the same: Prosper's change to more informative grading did not only lead to a larger role for those grades in investors' interest rates, but increased the weight of credit score bucket, a variable that investors had access to in the same format in both periods. If the crowd of investors were as wise as Hayek theorizes, Prosper's repackaging of multiple variables into a more informative credit grade should not affect the weight of hard information in investors' risk estimates. Furthermore, Figure \ref{fig:defvscore} makes is clear that investors would have experienced fewer defaults, and thus earned higher returns, if they had used credit buckets more heavily in their risk assessments, given the poor returns associated with low credit borrowers. We can thus interpret some of the poor returns of the early auction regime to a lower level of reliance on hard information. 
 
-In the next sub section, I examine Prosper's other interventions, which ban low-credit borrowers, and show that these interventions also similarly improved investor returns.
+In the next sub section, I estimate the impact of Prosper's other interventions, which ban low-credit borrowers.
 \subsection{Impact of Subprime Borrower Ban}
 <<csvtime,cache=FALSE,fig.height=3, fig.cap="This figure presents average estimated credit score of loans originated each month. The average credit score (using bucket midpoint) increases from 653 in the early auction regime to 714 in the late auction regime, before returning to 705 in the Prosper-rate regime. Grey clouds indicate one standard deviation.">>=
 ggplot(mmeans, aes(x=mgroup, y=mcs, color=regime)) +
@@ -830,7 +870,7 @@ ggplot(mmeans, aes(x=mgroup, y=mcs, color=regime)) +
 We now turn to Prosper's policy changes, which restrict the types of borrowers who investors are allowed to lend to. An auction perspective predicts that the crowd of lenders should be able to effectively screen all candidates, not just low risk candidates. On multiple occasions, however, Prosper has intervened to restrict the borrower pool to high credit borrowers, and thereby improved investor returns. Figure \ref{fig:csvtime} shows the mean borrower credit score for each month in the sample, with the grey clouds showing one standard deviation bounds. Overall, for the three samples in full, the average borrower credit scores increases from 653.2 before the shutdown to 714.2 after the shutdown, then dips to 705 for the Prosper-rate period.
 For the first 10 months of Prosper's history, investors choose to lend to borrowers with an average estimated credit score of 609. Prosper's policy change, on March 1, 2007, that prevented loans to ``low-credit borrowers," defined as those with credit score below 520, showed an immediate positive impact on investor decision making and returns.
 
-Prosper's reasoning for the change was to protect investors: by March 1, 2007, 14.9\% of loans to low-credit borrowers had already defaulted, more than triple the 4.6\% of loans to other borrowers that had already defaulted. \footnote{the 10\% gap in default rates is even more striking when the average age of the two groups of loans is considered. On March 1, 2007, the loans to low-credit borrowers averaged 100 days since origination, while loans to other borrowers averaged 122 days since origination. 14.9\% of low credit borrowers defaulted over an average time since origination of 100 days, whereas only 4.6\% of other borrowers defaulted over an average time since origination of 122 days.} Theoretically, however, it is more difficult to understand why Prosper needed to step in. From the EMH perspective, theory predicts that investors would have reacted to the news of the defaults on low credit loans by decreasing their exposure to low credit loans, or increasing the interest rates they bid on them. However, the median interest rate on low-credit, actually decreased from 24.23\% for the month of July, 2006 to 23.4\% for February, 2007, the month before the intervention. Similarly, exposure to low credit loans did not substantially decrease. On December 1, 2006, 13.3\% of these bad loans had already, after an average of only 3 monthly payments, gone into default, as compared to 3.7\% of other loans. Yet over the month of December 2006, loans to borrowers with credit score below 520 accounted for 22\% of orginations, the highest proportion in the site's history.  The wisdom of the crowd theory expects market participants to adjust their beliefs to new information more rapidly and flexibly than Prosper. The data, however, show that investors continued to make avoidably bad decisions until Prosper disallowed them. 
+Prosper's reasoning for the change was to protect investors: by March 1, 2007, 14.9\% of loans to low-credit borrowers had already defaulted, more than triple the 4.6\% of loans to other borrowers that had already defaulted. \footnote{the 10\% gap in default rates is even more striking when the average age of the two groups of loans is considered. On March 1, 2007, the loans to low-credit borrowers averaged 100 days since origination, while loans to other borrowers averaged 122 days since origination. 14.9\% of low credit borrowers defaulted over an average time since origination of 100 days, whereas only 4.6\% of other borrowers defaulted over an average time since origination of 122 days.} Theoretically, however, it is more difficult to understand why Prosper needed to step in. From the EMH perspective, theory predicts that investors would have reacted to the news of the defaults on low credit loans by decreasing their exposure to low credit loans, or increasing the interest rates they bid on them. However, the median interest rate on low-credit, actually decreased from 24.23\% for the month of July, 2006 to 23.4\% for February, 2007, the month before the intervention. Similarly, exposure to low credit loans did not substantially decrease. On December 1, 2006, 13.3\% of these bad loans had already, after an average of only 3 monthly payments, gone into default, as compared to 3.7\% of other loans. Yet over the month of December 2006, loans to borrowers with credit score below 520 accounted for 22\% of orginations, the highest proportion in the site's history.  Hayek's wisdom of the crowd theory expects market participants to adjust their beliefs to new information more rapidly and flexibly than Prosper. The data, however, show that investors continued to make avoidably bad decisions until Prosper disallowed them. 
 
 After the intervention, returns improved substantially. For the loans originated in February 2007, the month before the change, the mean borrower credit score was 620, with standard deviation 117, while the mean ROI on a loan was -13.1\%. For loans originated in March 2007, the month after the change, the mean borrower credit score was 650, with standard deviation of 83, and mean ROI -7.4\%. The 30 point month to month increase in mean borrower credit score is the largest in the sample, and the associated ROI change is not caused by time differences: the default rate to borrowers in the 640-660 bucket, a representative example, was 42.7\% in February, and actually rose to 44.8\% in March. Had Prosper enforced this rule from the site's inception, the default rate on loans originated before the rule change would have been reduced by 6\%, and mean roi would have increased from -9.1\% to -4\%, a savings of roughly \$2 million for investors.
 
@@ -897,7 +937,6 @@ For each regime \ldots
 \item Select the 10\% of Loans from each credit grade with the lowest predicted Known-default probability.
 \item Compare ROI of selected loans against the  benchmark of a strategy that chooses every loan.
 \end{enumerate}
-
 \subsubsection{Assumptions}
 Two assumptions underly the out-of sample loan selection technique which selects from the pool of loans that were funded by Prosper's investors, at the rate they received. First, in the auction regime, by sucessfully bidding on a loan, investors may decrease the interest rate. This analysis assumes that a strategy does not move the interest rates of the loans it selects. Second, a strategy never chooses to fund loans that will end up unfunded, since we cannot observe their ROIs.
 
@@ -986,7 +1025,6 @@ msd =group_by(res.clean,mgroup,regime,model) %>%
   group_by(regime,model) %>%
   summarise(sdev = sd(mn, na.rm=TRUE))
 
-
 tab = inner_join(hmeans,msd,by=c('regime','model'))
 nd$t  = ifelse(nd$roi <0, 1,0)
 dr1 = group_by(nd, regime)  %>% summarise(d.rate = sum(t)/length(t))
@@ -1042,27 +1080,7 @@ An expansion of this project could retrain the model every month with the benefi
 
 Engineering a known-roi dependent variable that equals the percentage of expected repayment of principal an investor received from each borrower up to the relevant date, would allow the model to make risk-reward calculations when deciding between loans, as opposed to just choosing the least risky loans.
 
-<<retTab2,cache=FALSE,eval=FALSE>>=
-vmeans = res %>% group_by(regime,model,grade) %>%  
-  summarise(mn = sum((1+meanUL) *length) / sum(length) -1, n=sum(length))
 
-bm = filter(vmeans, model=='Benchmark'); rm = filter(vmeans, model=='Regression')
-csdiffs = inner_join(bm,rm, by=c('grade','regime')) %>% transform(delta = mn.y - mn.x)
-excess = spread(csdiffs[c('regime','grade','delta')], grade,delta)
-excess = cbind(excess[1],excess[3], excess[c(-1,-3)])
-xtable(excess,label='excess',
-       caption='The excess returns earned by each regression model on loans in each Credit grade'
-       , digits=3)
-@
-<<os.chart3,cache=FALSE,fig.height=8,fig.width=10, fig.cap='The rois of the loans selected by Each strategy by Credit Grade and Regime. Dotted lines indicate means. For example, In the Prosper-rate (2nd) column in the D (5th) row, the green distribution represents the ROIs of all the Grade D loans selected by the Linear Model',eval=FALSE>>=
-ggplot(res, aes(x=meanUL,fill=model))  + geom_density(alpha=.7) +
-  facet_grid(grade ~ regime, scales='free') + 
-  theme_bw() +
-  geom_vline(data = vmeans, aes(xintercept=mn,color=model)) +
-  labs(x='ROI', y='Density', fill='Model',title='Out of Sample Performance')+
-  scale_y_continuous()+
-  scale_x_continuous(label=percent, limits = c(-.5,NA))
-@
 
 \section{Controlling for Time Period}
 <<rateSim,  results='hide', cache=FALSE>>=
@@ -1099,20 +1117,34 @@ if(FALSE){
 The first two inconsistencies with EMH predictions: that early auction regime loans have negative average ROI, and that riskier early auction regime loans earn investors negative ROI, are both vulnerable to time period. Specifically, maybe the early period just happened to be bad for loan repayments. In this section, I aim to show that the decisions made by early investors, namely to lend to low credit borrowers and to demand far lower interest rates than hard variables would suggest, partly explain the difference in ROI. Thus, the question guiding this section is: \textbf{what would have happened to investor returns in the early auction regime if investors only lent to borrowers that would have qualified for loans in the late auction regime, and demanded the rates charged by investors in the late auction period?} This will help to understand whether the change in returns between the early and late auction regimes was merely a consequence of an unpredictably higher default rate.
 
 \subsection{Methodology}
-In order to estimate the hypothetical returns in an early auction regime where investors charged late auction regime rates to borrowers who would have met the late auction regime criteria, we must reduce early auction borrowers to the subset that would have been acceptable in the late auction regime, estimate what interest rate late auction regime investors would have charged them, and then use this estimated rate to predict a new ROI.
+In order to estimate the hypothetical returns in an early auction regime where
+investors charged late auction regime rates to borrowers who would have met the
+late auction regime criteria, we must (1) reduce early auction borrowers to the
+subset that would have been acceptable in the late auction regime,(2) estimate
+what interest rate late auction regime investors would have charged them, and
+(3) then use this estimated rate to predict a new ROI.
 
-The first step, restricting the borrower pool, is simple. In the late auction regime, Prosper required that new borrowers  have a credit score greater than 640, and that returning borrowers have  a credit score greater than 600 in order to apply for a loan. Applying this rule reduces the number of early auction regime loans whose rate we will adjust by 40.4\%, from 27,764 to 16,545. \footnote{This may not go far enough, as late auction regime investors refused to fund many borrowers applications.}
+The first step, restricting the borrower pool, is simple. In the late auction regime, Prosper required that new borrowers  have a credit score greater than 640, and that returning borrowers have  a credit score greater than 600 in order to apply for a loan. Applying this rule reduces the number of early auction regime loans whose rate we will adjust by 40.4\%, from 27,764 to 16,545.\footnote{This may not go far enough, as late auction regime investors refused to fund many borrowers applications.}
 
 The second step of the method involves finding the hypothetical interest rate an early auction regime borrower would have paid in the late auction regime. For simplicity, this \emph{adjusted rate} is computed by finding the median interest rate paid by late auction regime borrowers in the same credit score bucket, \textit{EG} 700-720.
 
-I then predict what the loan's ROI would have been if the borrower had paid that adjusted rate by multiplying the payments the borrower made under the old regime by the ratio of $\frac{(1 + adjusted rate)}{(1 + old rate)}$.
+To simplify the third step, predicting a hypothetical ROI given actual loan performance and
+a new, adjusted interest rate, I assume that borrowers would have made the same
+number of monthly payments, but that each payment would be slightly bigger,
+given the new interest rate. This adjusted roi is calculated by multiplying the payments the borrower made under the old regime by the ratio of $\frac{(1 + adjusted rate)}{(1 + old rate)}$.
 
-As an instructional example, suppose Bill is an early auction regime borrower in the 700-720 credit score bucket.
-Under the early-auction regime, Bill borrowed \$100 from investors at a 13\% interest rate, and returned \$113, over the one year course of his loan. \footnote{Neither maturity nor principal matter, for our purposes}
+As an instructional example, suppose Bill is an early auction regime borrower in
+the 700-719 credit score bucket.
+Since Bill's credit score is above the 640 cutoff, he remains in the sample.
+
+Under the early-auction regime, Bill borrowed \$100 from investors at a 13\% interest rate, and returned \$113, over the one year course of his loan.\footnote{Neither maturity nor principal matter, for our purposes}
 
 In the late auction regime, the median borrower 700-720 borrower paid 23\% interest, 
 so, Bill's Adjusted-Rate is 23\%.
-To calculate Bill's Adjusted ROI, we multiply Bill's Actual ROI by the ratio of the interest rates.
+
+To calculate Bill's Adjusted ROI, we multiply the monthly payments he actually
+made, by the ratio of the interest rates. And then divide the result by the
+principal and subtract 1. This reduces to: 
 \begin{equation}
 ADJ.ROI = \frac{Payments}{Amount.Borrowed} * \frac{ADJ.Rate}{Actual.Rate}
 \end{equation}
@@ -1126,7 +1158,10 @@ In this second case, Bill's Adjusted ROI = $\frac{45}{100} * \frac{1.23}{1.13} -
 Three assumptions facilitate this methodology, but also cause bias.
 Most importantly, the methodology ignores the idea of cost-induced default, as discussed by (Stiglitz and Weiss, 1976):
 first, forcing the borrower to pay more per month might push him over the default tipping point.\footcite{credit}
-Empirical validation of this theory can be found in (Wei and Lin, 2013)'s examination of Prosper's transition from the late auction regime to the Prosper-rate regime, which shows that when borrowers were assigned higher interest rates, they defaulted more frequently. With this in mind, my adjusted ROI serves as an \textbf{upper bound} for the possible ROI because it assumes that each borrower makes the same number of payments, even though each payment is higher. More realistically, we might expect Bill to make fewer payments on his loan if he found it difficult to afford his interest rate.
+Empirical validation of this theory can be found in Wei and Lin (2013)'s
+examination of Prosper's transition from the late auction regime to the
+Prosper-rate regime, which shows that when borrowers were assigned higher
+interest rates, they defaulted more frequently.\footcite{wei} With this in mind, my adjusted ROI serves as an \textbf{upper bound} for the possible ROI because it assumes that each borrower makes the same number of payments, even though each payment is higher. More realistically, we might expect Bill to make fewer payments on his loan if he found it difficult to afford his interest rate.
 
 Two other assumptions work in the other direction, however. First, we have assumed that all applications that satisfied Prosper's minimum borrower standards would have been funded by investors. In reality, many applications met the criteria but were not funded. Secondly, we have assumed that in our hypothetical world early auction regime borrowers would pay the same rate as late auction regime borrowers in their credit bucket. In reality, however, they would probably pay higher rates, because controlling for credit score bucket, they have worse average delinquencies, credit card utilization and other hard variables that would be used for grading. 
 
@@ -1156,8 +1191,8 @@ xtable(adj.tab, caption='The aggregated results of the Rate Adjustment Experimen
 At each credit score, an upper bound estimated of the fraction of the ROI gap that would be accounted for by adjusted interest rates can be measured as:
 \begin{equation}
 rate.factor = \frac{mean(adj.roi)-mean(early.roi)}{mean(late.roi)-mean(early.roi)}
-\end{equation}\footnote{Visually, think of it as if we are walking up the plot from the red line to green line,  what percentage of the way would we make it before we encountered the blue line.}
-This \emph{rate factor} is, by construction, heavily correlated with the difference in interest rates for each regime.   At the lowest included estimated credit score, 649.5, the difference in average interest rate is 9.3\%, and that difference explains 42.1\% of the 19.2\% difference in average ROI. At the higher buckets, the difference in interest rates for borrowers in the 800-820 credit score bucket was 0.3\%, and this difference explained only 3\% (not half) of the 6\% difference in average ROI.
+\end{equation}
+This \emph{rate factor}\footnote{Visually, think of rate factor as if we are walking up the plot from the red line to green line,  what percentage of the way would we make it before we encountered the blue line.} is, by construction, heavily correlated with the difference in interest rates for each regime.   At the lowest included estimated credit score, 649.5, the difference in average interest rate is 9.3\%, and that difference explains 42.1\% of the 19.2\% difference in average ROI. At the higher buckets, the difference in interest rates for borrowers in the 800-820 credit score bucket was 0.3\%, and this difference explained only 3\% (not half) of the 6\% difference in average ROI.
 <<rateSimResults, cache=FALSE,eval=FALSE>>=
 auc = filter(decomp, regime=='Auction-Early')
 adj = filter(decomp, regime=='Auction-Early.Adj-rate')
@@ -1212,5 +1247,37 @@ By comparing the performance of Prosper loans originated in each period to the p
 \item Future research: same experiment with known ROI. Better time controls? Look at consistent errors in mistakes borrowers made.
 \end{enumerate}
 \newpage
+\begin{appendices}
+\section{Prosper's Charged-Off vs. Default Terminology}
+\footnote{remove this part?}
+After the shutdown, Prosper began using the term ``Charged-Off" to mean that a loan is delinquent past 120 days. We observe more defaults than charge-offs before the shutdown, but more charge-offs than defaults after, likely because of the shift in terminology. According to Prosper's website:
+\begin{quote}
+In general, a debt or account is considered “charged off” when it is unlikely that further payments will be received. Debts are usually charged off after they remain unpaid for a period of time (e.g., 90 to 180 days). Prosper uses the 120 days as the charge off threshold because loans that become over 120 days past due are eligible for sale to a debt buyer, and we have found that there is a steep drop-off in likelihood of further payments after 120 days of delinquency.
+\footnote{\url{http://blog.prosper.com/2008/09/16/charge-offs-explained/}}
+\end{quote}
+
+\section{Out of Sample Performance by Credit Grade}
+<<retTab2,cache=FALSE>>=
+vmeans = res %>% group_by(regime,model,grade) %>%  
+  summarise(mn = sum((1+meanUL) *length) / sum(length) -1, n=sum(length))
+
+bm = filter(vmeans, model=='Benchmark'); rm = filter(vmeans, model=='Regression')
+csdiffs = inner_join(bm,rm, by=c('grade','regime')) %>% transform(delta = mn.y - mn.x)
+excess = spread(csdiffs[c('regime','grade','delta')], grade,delta)
+excess = cbind(excess[1],excess[3], excess[c(-1,-3)])
+xtable(excess,label='excess',
+       caption='The excess returns earned by each regression model on loans in each Credit grade'
+       , digits=3)
+@
+<<os.chart3,cache=FALSE,fig.height=8,fig.width=10, fig.cap='The rois of the loans selected by Each strategy by Credit Grade and Regime. Dotted lines indicate means. For example, In the Prosper-rate (2nd) column in the D (5th) row, the green distribution represents the ROIs of all the Grade D loans selected by the Linear Model'>>=
+ggplot(res, aes(x=meanUL,fill=model))  + geom_density(alpha=.7) +
+  facet_grid(grade ~ regime, scales='free') + 
+  theme_bw() +
+  geom_vline(data = vmeans, aes(xintercept=mn,color=model)) +
+  labs(x='ROI', y='Density', fill='Model',title='Out of Sample Performance')+
+  scale_y_continuous()+
+  scale_x_continuous(label=percent, limits = c(-.5,NA))
+@
+\end{appendices}
 \printbibliography
 \end{document}
