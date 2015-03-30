@@ -1122,7 +1122,7 @@ that investors failed to attend to these variables, as Freedman and Jin suggest,
 and that Prosper as a market maker fixed their errors. Prosper's subsequent
 reliance on the information I use to beat the market, supports the argument that
 the information was, in fact valuable, while the facts of Section 4, namely
-Figure \ref{ratevscore}, aim to show
+Figure \ref{fig:ratevscore}, aim to show
 that the information was largely ignored. Even more importantly, this analysis is NOT
 vulnerable to the critique that my tests of market efficiency are undermined by
 an unlucky time period. In particular, Prosper used these same variables to
@@ -1339,7 +1339,7 @@ wre more selective than early regime borrowers. Secondly, we have assumed that i
 To summarize, the total.ROI reported using the adjusted borrower population is probably a little lower than it should be, and the total.ROI reported using adjusted interest rates is probably higher than it should be.
 
 \subsection{Results \& Discussion}
-<<adjfig, cache=FALSE, fig.cap='This chart displays the results of our rate-adjustment experiment. The blue line is the result of our rate-adjustment experiment, and displays the hypothetical ROI if late auction regime borrowers had paid early auction interest rates. The grey cloud represents a 2\% adjustment for cost-induced default.'>>=
+<<adjfig, cache=FALSE, fig.cap='This chart displays the results of our rate-adjustment experiment. The blue line is the result of our rate-adjustment experiment, and displays the hypothetical ROI if late auction regime borrowers had paid early auction interest rates. The grey cloud represents a 2 percent adjustment for cost-induced default.'>>=
 ggplot(decomp, aes(x=CreditScoreEst, y=meanRoi, color=regime)) +
   #geom_line(aes(x=CreditScoreEst, y=meanRoi, color=regime, size=num)) +
   geom_point(aes(size=num))+
@@ -1400,7 +1400,57 @@ xtable(xx, label='macro.samp', caption='The Portion of borrowers from each credi
 @
 By comparing the performance of Prosper loans originated in each period to the performance of traditional consumer credit loans originated in each period, controlling for credit score as best we can\footnote{Method: Given the default rates of some consumer loans, and a table of the frequency of a bunch of credit scores, I created the same credit score groups in the Prosper data, took each group's mean default rate, and took the weighted average default rate for each year, with the group's representation in the Capital One borrower pool, shown in Table \ref{macro.samp} as the weights. Since the Capital One loans are of different maturities, I measured the portion of defaults within three years of origination.} we can gain a better understanding of the time period. The data presented in Table \ref{macro} show that for all credit scores, default rates are higher for Prosper loans than Capital One loans, but that the difference is much larger in the early auction regime. There may again be flawed assumptions, including adverse selection of borrowers on the internet, other credit variables besides score, and the different maturities of the loans, but the data again suggest that early auction regime investors did a particularly bad job.
 
-\section{Conclusion (TODO)}
+\section{Conclusion}
+This paper examined interest rate setting and lender returns on Prosper.com. It
+took advantage of three policy regimes over the course of 2006-2011. In the
+first regime, investors set interest rates through a decentralized reverse
+auction; in the second regime they continued to use the auction, but with
+considerably more guidance from Prosper; and in the third regime Prosper set the
+rates directly. I find that compared with the later two periods, interest rates
+during the early auction regime were much lower and less sensitive to risk, and
+that investor returns were much lower than in the later two regimes.
+
+I further examined these findings and argued that the evidence from the early
+auction regime is inconsistent with the predictions of the EMH. In particular, I
+reported three findings: average returns in the early auction period are
+negative, riskier loans earn lower average returns than more risky ones, and
+--most importantly -- one can use loan selection strategies without look-ahead
+bias to select well-performing loans in the early auction period. The third
+finding is inconsistent with the most fundamental prediction of the EMH, that an
+investor cannot earn superior risk-adjusted returns based on publicly available
+information.
+
+The first two findings are vulnerable to the critique that my results depend on
+the particularly bad time period (2006-2008) during the early auction years. I
+show that, even correcting for the time period, returns would have been poor
+because interest rates were set too low and insufficiently sensitive to risk.
+My third finding is more difficult to criticize based on the time period, since
+it shows that investors could have done better in the same period, the second
+half of the early auction regime, based on publicly available information.
+
+I offer two critical pieces of corroborating evidence. First, when Prosper began
+setting interest rates, it appears to haved use publicly available
+variables to set interest rates that are very similar to those selected by my
+Feature Selection algorithm totally independently, and then used to earn
+superior returns by taking advantage of the fact that investors neglected them.
+Second, I present some evidence that, in the early auction period, Prosper loans
+performed considerably worse than Capital One loans with similar risk
+characteristics. In short, all the evidence suggests that the decentralized
+unguided mechanism of the early auction period did not lead to efficient
+interest rates for Prosper loans.
+
+The last finding has implications for financial economics and market design. It
+suggests that contrary to Hayek's vision that the wisdom of the crowds leads to
+efficient price setting, the crowds did not utilize all the public information
+available to them, and made significant mistakes. Prosper learned this quite
+quickly, and intervened in completely decentralized price formation. Guidance,
+and eventually price intervention from the market maker, likely improved returns
+substantially. The evidence cautions against the assumption of universal
+investor rationality. More important, it suggests that design of markets that
+protects investors from their errors and limited attention, either by fairly
+aggressive guidance or even price setting, can improve market performance
+dramatically.
+
 \begin{enumerate}
 \item Restate results.
 \item Market maker intervention may be useful when info gathering costs are high.
