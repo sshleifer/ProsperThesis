@@ -29,7 +29,7 @@ require(gridExtra)          ### For facet plots
 require(knitr)              ### For chunk control, compilation
 require(leaps)              ### For feature selection
 require(lubridate)          ### For date grouping, conversions
-require(reshape2)           ### For melt() before ggplot
+require(reshape2)           ### For melt() before ggplotx
 require(scales)             ### For plots
 require(texreg)             ### Regression Output using texreg()
 require(tidyr)              ### For spread()
@@ -315,6 +315,8 @@ argument, which finds that over a somewhat longer period of time, simple loan
 selection strategies can use publicly available information to earn higher
 returns than the benchmark.\footnote{Benchmark is calculated by assuming \$1 investment in every available loan.}
 
+%if was all time, why would Prosper use same variables to make grades.
+%Some of the evidence is inconsistent with time period argument. Can find variables, once Prosper starts using same variables, no more excess returns. Prosper themselves understood this.
 \subsection{Background}
 Peer-to-peer lending (``P2PL")  is the practice of lending money to borrowers
 over the internet, without going through a traditional financial
@@ -879,13 +881,66 @@ A similar line of analysis can be applied to examine the impact of Prosper's sec
 
 \section{Excess Returns}
 \subsection{Puzzle: Bad Returns in Early Auction regime}
-The key inconsistency with EMH found in the early auction regime data is that a simple loan selection strategy can earn excess returns using publicly available information.
-This section explains the methodological approach used to create such a strategy, including discussion of cross-validation and avoidance of look-ahead bias, and closes with a discussion of the excess returns earned by the strategy.
 
-Although Figure \ref{fig:ratevscore} shows that investors charge higher rates to riskier borrowers, the high risk, low-reward data pattern of the early auction regime, shown in Figure \ref{fig:roivscore} suggests that this preference for more credit-worthy borrowers is not extreme enough, since the extra interest charged to riskier borrowers does not, in aggregate, make up for the difference in default likelihood. This suggests that the variables given to investors by Prosper could be better used to assess borrower creditworthiness, and select loans with the lower likelihood of default. In this section, I use a regression model (that a naive investor might be able to use to choose loans) to show that a simple model to assess borrower creditworthiness can select loans, out of sample, that earn higher returns than the loans funded by investors. First I carefully discuss the methodology, which sets up the linear regressions that (1) can be tested by the mean ROI of the loans they choose out of sample, and thus will be penalized for overfitting, (2) are trained on data that would not have been available at the time of the decision (3) uses automated feature selection, so that I, with the benefit of hindsight, don't choose which variables will be included.
+Although Figure \ref{fig:ratevscore} shows that investors charge higher rates to
+riskier borrowers, it also shows that early auction regime investors were
+insensitive to differences between low-credit borrowers, and, more generally,
+less sensitive to credit score than borrowers in subsequent regimes. 
+The high risk, low-reward data pattern of the early auction regime, shown in
+Figures \ref{fig:roivscore} \ref{defvscore} show that this sensitivity to credit
+score was far too low, and does not come close to making up for the difference
+in default likelihood. These claims, however, are both vulnerable to the
+critique of an unlucky time period. In this section, I present this essay's key
+test of market efficiency: can a simple loan selection strategy earn excess
+returns using publicly available information?
+
+The answer is simple, but powerful: when investors set interest rates by
+auction, in the early auction and late auction regimes, it is possible to earn
+excess returns. Once Prosper starts setting rates, my methodology is no longer
+able to earn excess returns.
+
+The rest of this section discusses the methods used to create such a strategy,
+and the results of the strategy. In the methodology sub-section, I define
+publicly available information as 'the information that would have been
+available at origination date, the day a given loan was originated,' and discuss
+the the principal challenge with complying with this definition: 
+\begin{quote}
+On origination day, Investors only know which loans have \emph{already}
+defaulted. Many loans will end up defaulting later, but to investors, they appear
+to be performing well.
+\end{quote}
+
+This insight creates four major challenges. First, we must create a variable, for
+each loan, that indicates whether the loan had already defaulted on Origination
+date, and use that as the dependent variable in a regression, rather than using
+the natural defaulted or ROI variables used in section 4. Second, we must fix a
+\emph{cut date} at which we use all publicly available information to train a
+linear model, and then use this model to select from the pool of loans that have
+not been originated.\footnote{This approach also carries the standard
+cross-validation benefit, by penalizing overfitting.} Thirdly and most subtly, an investor would not have known
+which variables would be useful predictors of future loan performance, only
+which variables had been past predictors of loan performance, as such, I do not
+choose the independent variables used by the linear model, an automated feature
+selection procedure makes this decision. Finally, during some month after the
+\emph{cut date} investors did not know whether the listings in the future would
+be more profitable than the listings in the present, so the strategy must choose
+10\% of the loans offered in a given month in each credit grade, rather than
+considering the full pool of loans and picking the best 10\%.\footnote{The
+credit grade constraint is to ensure that the models do not use our hindsight
+knowledge that certain credit grades performed poorly to improve performance.}
+
+The methodology sub-section which follows, further explores the nature of
+these challenges, the implementation of the solutions, and new challenges
+created by the solutions, of which there are thankfully few.
+The section then continues with In Sample results, which show that the independent
+variables chosen by the feature selection protocol are very similar to the
+variables Prosper used to make its more informative grading, and that
+mispricings were most predictable in the early auction regime. The section
+concludes with Out-of-Sample results, which show that such a strategy can earn
+excess out-of-sample returns in the early auction and late auction regimes, when
+investors set interest rates, but fails to earn excess returns in the
+Prosper-rate regime, when Prosper sets interest rates directly.
 \subsection{Methodology}
-
-
 \subsubsection{Cross Validation Procedure}
 <<crossValexp, cache=FALSE>>=
 cval = data.frame('Sample'= c('Auction-Early.train', 'Auction-Early.test','Auction-Late-.train','Auction-Late.test',
@@ -1039,20 +1094,7 @@ colnames(fs2) = c('Regime','BM.mean','BM.sd','LM.mean','LM.sd','BM.default','LM.
 fs3 = cbind(fs2[1:3],fs2[6],fs2[4:5],fs2[7])
 fs3['Excess'] = fs3$LM.mean - fs3$BM.mean
 xtable(fs3,label='aggstats',
-       caption='The mean return and standard deviation of return of the loans selected by the Linear Model (LM) compared with all loans (BM for benchmark). BM.default and LM.default are the default rates of the relevant selected loans. Excess returns equals LM.mean - BM.mean', digits=3)
-
-if(FALSE){
-
-  fs2  = transform(fs2, ret = LM.mean - BM.mean, sd = LM.sd - BM.sd, def = LM.default - BM.default)
-  bmtab = fs2[c('Regime','BM.mean','BM.sd','BM.default')]
-  colnames(bmtab) = c('Regime','Mean ROI','St.Dev','Default rate')
-  lmtab = fs2[c('Regime','LM.mean','LM.sd','LM.default')]
-  colnames(lmtab) = c('Regime','Mean ROI','St.Dev','Default rate')
-  
-  diffs = fs2[c('Regime','ret','sd','LM.default')]
-  colnames(diffs) = c('Regime','Return','Variance','Default Rate')
-}
-
+       caption='This table compares the out of sample performance of the linear model (LM) strategies to the benchmark (BM). As shown in the next figure. The column names are in the format (Strategy).(statistic), where (LM) for linear model and (BM) for benchmark are the two strategies, and mean return of selected loan (mean), standard deviation of monthly returns (sd) and mean default rate of selected loans (default) are the statistics. For example, the LM.mean column shows the average ROI of a loan selected (out of sample, of course) by the linear model in each of the three regimes. The Excess column is calculated as LM.mean - BM.mean, and thus represents the difference in returns between the loans selected by the linear model and the benchmark over each regime. Notice that the Excess returns are positive for the first two regimes, where investors were involved in setting interest rates, and roughly 0 in the most recent regime, where Prosper set rates directly.', digits=3)
 @
 
 <<os.chart2,fig.cap="Strategy's Out Of Sample Performance for Each Month. Loan Selection Strategies described in Methodology section.",fig.width=10,fig.height=8>>=
@@ -1079,8 +1121,6 @@ In summary, over the inital two regimes where investors are involved in the proc
 An expansion of this project could retrain the model every month with the benefit of newly observed defaults and newly originated loans, and expect performance improvements.
 
 Engineering a known-roi dependent variable that equals the percentage of expected repayment of principal an investor received from each borrower up to the relevant date, would allow the model to make risk-reward calculations when deciding between loans, as opposed to just choosing the least risky loans.
-
-
 
 \section{Controlling for Time Period}
 <<rateSim,  results='hide', cache=FALSE>>=
@@ -1193,18 +1233,7 @@ At each credit score, an upper bound estimated of the fraction of the ROI gap th
 rate.factor = \frac{mean(adj.roi)-mean(early.roi)}{mean(late.roi)-mean(early.roi)}
 \end{equation}
 This \emph{rate factor}\footnote{Visually, think of rate factor as if we are walking up the plot from the red line to green line,  what percentage of the way would we make it before we encountered the blue line.} is, by construction, heavily correlated with the difference in interest rates for each regime.   At the lowest included estimated credit score, 649.5, the difference in average interest rate is 9.3\%, and that difference explains 42.1\% of the 19.2\% difference in average ROI. At the higher buckets, the difference in interest rates for borrowers in the 800-820 credit score bucket was 0.3\%, and this difference explained only 3\% (not half) of the 6\% difference in average ROI.
-<<rateSimResults, cache=FALSE,eval=FALSE>>=
-auc = filter(decomp, regime=='Auction-Early')
-adj = filter(decomp, regime=='Auction-Early.Adj-rate')
-pr = filter(decomp, regime=='Auction-Late')
-cs = inner_join(auc,adj, by='CreditScoreEst') %>% inner_join(pr,by='CreditScoreEst')
 
-cs.tab =  cs %>% mutate(delta.1 = meanRoi.y - meanRoi.x
-                        ,delta.2 = meanRoi - meanRoi.y
-                        ,delta.3 = meanRoi -meanRoi.x
-                        ,rate.factor =delta.1/delta.3
-                        ,delta.rate = meanRate - meanRate.x)
-@
 The aggregated returns of the regimes, as shown in Table \ref{adj}, indicate that if early auction regime borrowers had self enforced the minimum standards Prosper introduced in the second period, investor returns would have improved by at least 2.8\%. If investors had charged these borrowers the rates similar borrowers were charged in the late auction regime, returns might have improved by another 5.75\%.
 
 These results suggest that although much of the difference in performance between regimes is due to an especially bad time period, roughly $\frac{1}{3}$ of the difference in returns between the early auction and late auction regimes can be explained by poor investor decisions.
@@ -1247,16 +1276,14 @@ By comparing the performance of Prosper loans originated in each period to the p
 \item Future research: same experiment with known ROI. Better time controls? Look at consistent errors in mistakes borrowers made.
 \end{enumerate}
 \newpage
-\begin{appendices}
-\section{Prosper's Charged-Off vs. Default Terminology}
-\footnote{remove this part?}
+%\begin{appendices}
+\section{Appendix}
+\subsection{Prosper's Charged-Off vs. Default Terminology}
 After the shutdown, Prosper began using the term ``Charged-Off" to mean that a loan is delinquent past 120 days. We observe more defaults than charge-offs before the shutdown, but more charge-offs than defaults after, likely because of the shift in terminology. According to Prosper's website:
 \begin{quote}
-In general, a debt or account is considered “charged off” when it is unlikely that further payments will be received. Debts are usually charged off after they remain unpaid for a period of time (e.g., 90 to 180 days). Prosper uses the 120 days as the charge off threshold because loans that become over 120 days past due are eligible for sale to a debt buyer, and we have found that there is a steep drop-off in likelihood of further payments after 120 days of delinquency.
-\footnote{\url{http://blog.prosper.com/2008/09/16/charge-offs-explained/}}
+In general, a debt or account is considered “charged off” when it is unlikely that further payments will be received. Debts are usually charged off after they remain unpaid for a period of time (e.g., 90 to 180 days). Prosper uses the 120 days as the charge off threshold because loans that become over 120 days past due are eligible for sale to a debt buyer, and we have found that there is a steep drop-off in likelihood of further payments after 120 days of delinquency.\footcite{chargeoff}
 \end{quote}
-
-\section{Out of Sample Performance by Credit Grade}
+\subsection{Out of Sample Performance by Credit Grade}
 <<retTab2,cache=FALSE>>=
 vmeans = res %>% group_by(regime,model,grade) %>%  
   summarise(mn = sum((1+meanUL) *length) / sum(length) -1, n=sum(length))
@@ -1278,6 +1305,20 @@ ggplot(res, aes(x=meanUL,fill=model))  + geom_density(alpha=.7) +
   scale_y_continuous()+
   scale_x_continuous(label=percent, limits = c(-.5,NA))
 @
-\end{appendices}
+\subsection{Rate Adjustment Results, by Credit Grade}
+<<rateSimResults, cache=FALSE,eval=FALSE>>=
+auc = filter(decomp, regime=='Auction-Early')
+adj = filter(decomp, regime=='Auction-Early.Adj-rate')
+prate = filter(decomp, regime=='Auction-Late')
+cs = inner_join(auc,adj, by='CreditScoreEst') %>% inner_join(prate,by='CreditScoreEst')
+
+cs.tab =  cs %>% mutate(delta.1 = meanRoi.y - meanRoi.x
+                        ,delta.2 = meanRoi - meanRoi.y
+                        ,delta.3 = meanRoi -meanRoi.x
+                        ,rate.factor =delta.1/delta.3
+                        ,delta.rate = meanRate - meanRate.x)
+#TO APPENDIX?
+@
+%\end{appendices}
 \printbibliography
 \end{document}
